@@ -1,8 +1,8 @@
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
 
-const int w = 1024;
-const int h = 768;
+const int w = 1280;
+const int h = 1024;
 const float omega = 10;
 
 struct vertex {
@@ -22,11 +22,17 @@ struct vertex {
 struct quad {
   std::array<vertex, 4> vertices;
   std::array<vertex, 4> adjusted;
-  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3) {
+  std::vector<std::array<vertex, 4>> partials;
+  bool visible;
+  bool wall;
+  vertex normal;
+  vertex centre;
+  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall) {
     vertices[0] = _p0;
     vertices[1] = _p1;
     vertices[2] = _p2;
     vertices[3] = _p3;
+    wall = _wall;
   }
 };
 
@@ -38,26 +44,188 @@ class Olc3d2 : public olc::PixelGameEngine {
 
  public:
   bool OnUserCreate() override {
-    quads.push_back(
-        quad(vertex(150.0f, 50.0f, 50.0f, 1), vertex(50.0f, 150.0, 50.0f, 0),
-             vertex(50.0f, 150.0f, 0.0f, 3), vertex(150.0f, 50.0f, 0.0f, 2)));
+    std::srand(std::time(nullptr));
+
+    for (int i = -20; i < 20; i++) {
+      for (int j = -20; j < 20; j++) {
+        float x1 = i * 50;
+        float y1 = j * 50;
+        float x2 = x1 + 50;
+        float y2 = y1;
+        float x4 = x1;
+        float y4 = y1 + 50;
+        float x3 = x1 + (x2 - x1) + (x4 - x1);
+        float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+        quads.push_back(
+            quad(vertex(x1, y1, 50.0f, -1), vertex(x2, y2, 50.0f, -1),
+                 vertex(x3, y3, 50.0f, -1), vertex(x4, y4, 50.0f, -1), false));
+      }
+    }
+
+    for (int i = 0; i < 100; i++) {
+      float x1 =
+          static_cast<float>(rand()) / static_cast<float>(RAND_MAX / w) - w / 2;
+      float y1 =
+          static_cast<float>(rand()) / static_cast<float>(RAND_MAX / w) - w / 2;
+      float x2 = x1 + 50;
+      float y2 = y1;
+      float x4 = x1;
+      float y4 = y1 + 50;
+      float x3 = x1 + (x2 - x1) + (x4 - x1);
+      float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+      quads.push_back(quad(vertex(x1, y1, 50.0f, 1), vertex(x2, y2, 50.0f, 0),
+                           vertex(x2, y2, 0.0f, 3), vertex(x1, y1, 0.0f, 2),
+                           true));
+
+      quads.push_back(quad(vertex(x2, y2, 50.0f, 1), vertex(x3, y3, 50.0f, 0),
+                           vertex(x3, y3, 0.0f, 3), vertex(x2, y2, 0.0f, 2),
+                           true));
+
+      quads.push_back(quad(vertex(x3, y3, 50.0f, 1), vertex(x4, y4, 50.0f, 0),
+                           vertex(x4, y4, 0.0f, 3), vertex(x3, y3, 0.0f, 2),
+                           true));
+
+      quads.push_back(quad(vertex(x4, y4, 50.0f, 1), vertex(x1, y1, 50.0f, 0),
+                           vertex(x1, y1, 0.0f, 3), vertex(x4, y4, 0.0f, 2),
+                           true));
+    }
 
     return true;
   }
 
-  float t = 0;
+  float angle = 0;
+  float myX = 0;
+  float myY = 0;
 
   bool OnUserUpdate(float fElapsedTime) override {
-    t++;
+    if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
+    if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
+
+    if (GetKey(olc::Key::W).bHeld) {
+      myX += std::sin(angle) * 5;
+      myY += std::cos(angle) * 5;
+    }
+    if (GetKey(olc::Key::S).bHeld) {
+      myX -= std::sin(angle) * 5;
+      myY -= std::cos(angle) * 5;
+    }
+    if (GetKey(olc::Key::A).bHeld) {
+      myX += std::cos(angle) * 5;
+      myY += -std::sin(angle) * 5;
+    }
+    if (GetKey(olc::Key::D).bHeld) {
+      myX -= std::cos(angle) * 5;
+      myY -= -std::sin(angle) * 5;
+    }
+
+    float m[3][3] = {{std::cos(angle), -std::sin(angle), 0},
+                     {std::sin(angle), std::cos(angle), 0},
+                     {0, 0, 1}};
 
     for (auto& q : quads) {
       for (int i = 0; i < 4; i++) {
-        q.adjusted[i].x = q.vertices[i].x;
-        q.adjusted[i].y = q.vertices[i].y + t;
-        q.adjusted[i].z = q.vertices[i].z;
+        q.adjusted[i].x = (q.vertices[i].x - myX) * m[0][0] +
+                          (q.vertices[i].y - myY) * m[0][1] +
+                          q.vertices[i].z * m[0][2];
+        q.adjusted[i].y = (q.vertices[i].x - myX) * m[1][0] +
+                          (q.vertices[i].y - myY) * m[1][1] +
+                          q.vertices[i].z * m[1][2];
+        q.adjusted[i].z = (q.vertices[i].x - myX) * m[2][0] +
+                          (q.vertices[i].y - myY) * m[2][1] +
+                          q.vertices[i].z * m[2][2];
 
+        q.visible = true;
+        q.partials.clear();
+      }
+
+      for (int i = 0; i < 4; i++) {
         if (q.adjusted[i].y < omega) {
+          if (!q.wall) {
+            if (q.adjusted[0].y < omega && q.adjusted[1].y < omega &&
+                q.adjusted[2].y < omega && q.adjusted[3].y < omega) {
+              q.visible = false;
+              break;
+            } else if (q.adjusted[0].y < omega || q.adjusted[1].y < omega ||
+                       q.adjusted[2].y < omega || q.adjusted[3].y < omega) {
+              int n = 0;
+              float nY = 0;
+              for (int j = 0; j < 4; j++) {
+                if (q.adjusted[j].y > nY) {
+                  nY = q.adjusted[j].y;
+                  n = j;
+                }
+              }
+
+              float alpha = 0.75;
+              float beta = 0.25;
+
+              float x1 = q.adjusted[n].x;
+              float y1 = q.adjusted[n].y;
+              float x2 = x1 + (q.adjusted[(n + 1) % 4].x - x1) * alpha;
+              float y2 = y1 + (q.adjusted[(n + 1) % 4].y - y1) * alpha;
+              float x4 = x1 + (q.adjusted[(n + 3) % 4].x - x1) * beta;
+              float y4 = y1 + (q.adjusted[(n + 3) % 4].y - y1) * beta;
+              float x3 = x1 + (x2 - x1) + (x4 - x1);
+              float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+              q.partials.push_back({vertex(x1, y1, q.adjusted[0].z, -1),
+                                    vertex(x2, y2, q.adjusted[1].z, -1),
+                                    vertex(x3, y3, q.adjusted[2].z, -1),
+                                    vertex(x4, y4, q.adjusted[3].z, -1)});
+
+              break;
+            }
+
+          } else {
+            int pair = q.vertices[i].pair;
+
+            if (q.adjusted[pair].y < omega) {
+              q.visible = false;
+              break;
+            }
+
+            float x0 = q.adjusted[i].x;
+            float y0 = q.adjusted[i].y;
+            float x1 = q.adjusted[pair].x;
+            float y1 = q.adjusted[pair].y;
+
+            float delta = (omega - y0) / (y1 - y0);
+
+            q.adjusted[i].x = q.adjusted[i].x +
+                              delta * (q.adjusted[pair].x - q.adjusted[i].x);
+
+            q.adjusted[i].y = q.adjusted[i].y +
+                              delta * (q.adjusted[pair].y - q.adjusted[i].y);
+          }
         }
+      }
+
+      float ax = q.adjusted[1].x - q.adjusted[0].x;
+      float ay = q.adjusted[1].y - q.adjusted[0].y;
+      float az = q.adjusted[1].z - q.adjusted[0].z;
+
+      float bx = q.adjusted[3].x - q.adjusted[0].x;
+      float by = q.adjusted[3].y - q.adjusted[0].y;
+      float bz = q.adjusted[3].z - q.adjusted[0].z;
+
+      float cx = q.adjusted[0].x + (q.adjusted[3].x - q.adjusted[0].x) / 2 +
+                 (q.adjusted[1].x - q.adjusted[0].x) / 2;
+      float cy = q.adjusted[0].y + (q.adjusted[3].y - q.adjusted[0].y) / 2 +
+                 (q.adjusted[1].y - q.adjusted[0].y) / 2;
+      float cz = q.adjusted[0].z + (q.adjusted[3].z - q.adjusted[0].z) / 2 +
+                 (q.adjusted[1].z - q.adjusted[0].z) / 2;
+
+      q.normal =
+          vertex(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+      q.centre = vertex(cx, cy, cz);
+
+      float dotProduct = q.centre.x * q.normal.x + q.centre.y * q.normal.y +
+                         q.centre.z * q.normal.z;
+
+      if (dotProduct < 0) {
+        q.visible = false;
       }
     }
 
@@ -77,14 +245,47 @@ class Olc3d2 : public olc::PixelGameEngine {
     DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
 
     for (auto q : quads) {
-      DrawLine(q.adjusted[0].x, q.adjusted[0].y, q.adjusted[1].x,
-               q.adjusted[1].y, olc::RED);
-      DrawLine(q.adjusted[1].x, q.adjusted[1].y, q.adjusted[2].x,
-               q.adjusted[2].y, olc::RED);
-      DrawLine(q.adjusted[2].x, q.adjusted[2].y, q.adjusted[3].x,
-               q.adjusted[3].y, olc::RED);
-      DrawLine(q.adjusted[3].x, q.adjusted[3].y, q.adjusted[0].x,
-               q.adjusted[0].y, olc::RED);
+      if (q.partials.size() > 0) {
+        for (auto p : q.partials) {
+          DrawLine(-p[0].x + w / 2, -p[0].y + h / 2, -p[1].x + w / 2,
+                   -p[1].y + h / 2, olc::YELLOW);
+          DrawLine(-p[1].x + w / 2, -p[1].y + h / 2, -p[2].x + w / 2,
+                   -p[2].y + h / 2, olc::YELLOW);
+          DrawLine(-p[2].x + w / 2, -p[2].y + h / 2, -p[3].x + w / 2,
+                   -p[3].y + h / 2, olc::YELLOW);
+          DrawLine(-p[3].x + w / 2, -p[3].y + h / 2, -p[0].x + w / 2,
+                   -p[0].y + h / 2, olc::YELLOW);
+        }
+
+      } else if (q.visible) {
+        DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                 -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                 q.wall ? olc::GREEN : olc::DARK_CYAN);
+        DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                 -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                 q.wall ? olc::GREEN : olc::DARK_CYAN);
+        DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                 -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                 q.wall ? olc::GREEN : olc::DARK_CYAN);
+        DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                 -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                 q.wall ? olc::GREEN : olc::DARK_CYAN);
+        FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
+                   q.wall ? olc::GREEN : olc::DARK_CYAN);
+      } else {
+        DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                 -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+        DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                 -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+        DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                 -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+        DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                 -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+      }
     }
 
     return true;
