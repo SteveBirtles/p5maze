@@ -5,6 +5,25 @@ const int w = 1280;
 const int h = 1024;
 const float omega = 10;
 
+struct Renderable {
+  Renderable() {}
+
+  void Load(const std::string& sFile) {
+    sprite = new olc::Sprite(sFile);
+    decal = new olc::Decal(sprite);
+  }
+
+  ~Renderable() {
+    delete decal;
+    delete sprite;
+  }
+
+  olc::Sprite* sprite = nullptr;
+  olc::Decal* decal = nullptr;
+};
+
+Renderable plasma;
+
 struct vertex {
   float x;
   float y;
@@ -25,6 +44,9 @@ struct quad {
   std::vector<std::array<vertex, 4>> partials;
   bool visible;
   bool wall;
+  float zOrder;
+  olc::vf2d projected[4];
+  std::vector<std::array<olc::vf2d, 4>> projectedPartials;
   vertex normal;
   vertex centre;
   quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall) {
@@ -37,6 +59,7 @@ struct quad {
 };
 
 std::vector<quad> quads;
+std::vector<quad*> sortedQuads;
 
 float unit = 100;
 
@@ -46,6 +69,8 @@ class Olc3d2 : public olc::PixelGameEngine {
 
  public:
   bool OnUserCreate() override {
+    plasma.Load("./plasma.png");
+
     std::srand(std::time(nullptr));
 
     for (int i = -20; i < 20; i++) {
@@ -66,30 +91,30 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
 
     for (int i = 0; i < 100; i++) {
-      float x1 =
-          static_cast<float>(rand()) / static_cast<float>(RAND_MAX / w) - w / 2;
-      float y1 =
-          static_cast<float>(rand()) / static_cast<float>(RAND_MAX / w) - w / 2;
-      float x2 = x1 + 50;
+      float x1 = unit * (rand() % 40 - 20);
+
+      float y1 = unit * (rand() % 40 - 20);
+
+      float x2 = x1 + unit;
       float y2 = y1;
       float x4 = x1;
-      float y4 = y1 + 50;
+      float y4 = y1 + unit;
       float x3 = x1 + (x2 - x1) + (x4 - x1);
       float y3 = y1 + (y2 - y1) + (y4 - y1);
 
-      quads.push_back(quad(vertex(x1, y1, 50.0f, 1), vertex(x2, y2, 50.0f, 0),
+      quads.push_back(quad(vertex(x1, y1, unit, 1), vertex(x2, y2, unit, 0),
                            vertex(x2, y2, 0.0f, 3), vertex(x1, y1, 0.0f, 2),
                            true));
 
-      quads.push_back(quad(vertex(x2, y2, 50.0f, 1), vertex(x3, y3, 50.0f, 0),
+      quads.push_back(quad(vertex(x2, y2, unit, 1), vertex(x3, y3, unit, 0),
                            vertex(x3, y3, 0.0f, 3), vertex(x2, y2, 0.0f, 2),
                            true));
 
-      quads.push_back(quad(vertex(x3, y3, 50.0f, 1), vertex(x4, y4, 50.0f, 0),
+      quads.push_back(quad(vertex(x3, y3, unit, 1), vertex(x4, y4, unit, 0),
                            vertex(x4, y4, 0.0f, 3), vertex(x3, y3, 0.0f, 2),
                            true));
 
-      quads.push_back(quad(vertex(x4, y4, 50.0f, 1), vertex(x1, y1, 50.0f, 0),
+      quads.push_back(quad(vertex(x4, y4, unit, 1), vertex(x1, y1, unit, 0),
                            vertex(x1, y1, 0.0f, 3), vertex(x4, y4, 0.0f, 2),
                            true));
     }
@@ -100,6 +125,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   float angle = 0;
   float myX = 0;
   float myY = 0;
+  float myZ = -unit / 2;
 
   bool OnUserUpdate(float fElapsedTime) override {
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
@@ -122,6 +148,13 @@ class Olc3d2 : public olc::PixelGameEngine {
       myY -= -std::sin(angle) * 5;
     }
 
+    if (GetKey(olc::Key::R).bHeld) {
+      myZ -= 5;
+    }
+    if (GetKey(olc::Key::F).bHeld) {
+      myZ += 5;
+    }
+
     float m[3][3] = {{std::cos(angle), -std::sin(angle), 0},
                      {std::sin(angle), std::cos(angle), 0},
                      {0, 0, 1}};
@@ -130,14 +163,15 @@ class Olc3d2 : public olc::PixelGameEngine {
       for (int i = 0; i < 4; i++) {
         q.adjusted[i].x = (q.vertices[i].x - myX) * m[0][0] +
                           (q.vertices[i].y - myY) * m[0][1] +
-                          q.vertices[i].z * m[0][2];
+                          (q.vertices[i].z - myZ) * m[0][2];
         q.adjusted[i].y = (q.vertices[i].x - myX) * m[1][0] +
                           (q.vertices[i].y - myY) * m[1][1] +
-                          q.vertices[i].z * m[1][2];
+                          (q.vertices[i].z - myZ) * m[1][2];
         q.adjusted[i].z = (q.vertices[i].x - myX) * m[2][0] +
                           (q.vertices[i].y - myY) * m[2][1] +
-                          q.vertices[i].z * m[2][2];
+                          (q.vertices[i].z - myZ) * m[2][2];
         q.visible = true;
+
         q.partials.clear();
       }
 
@@ -232,30 +266,30 @@ class Olc3d2 : public olc::PixelGameEngine {
               });
             }
           }
+        }
 
-        } else {
-          for (int i = 0; i < 4; i++) {
-            if (q.adjusted[i].y < omega) {
-              int pair = q.vertices[i].pair;
+      } else {
+        for (int i = 0; i < 4; i++) {
+          if (q.adjusted[i].y < omega) {
+            int pair = q.vertices[i].pair;
 
-              if (q.adjusted[pair].y < omega) {
-                q.visible = false;
-                break;
-              }
-
-              float x0 = q.adjusted[i].x;
-              float y0 = q.adjusted[i].y;
-              float x1 = q.adjusted[pair].x;
-              float y1 = q.adjusted[pair].y;
-
-              float delta = (omega - y0) / (y1 - y0);
-
-              q.adjusted[i].x = q.adjusted[i].x +
-                                delta * (q.adjusted[pair].x - q.adjusted[i].x);
-
-              q.adjusted[i].y = q.adjusted[i].y +
-                                delta * (q.adjusted[pair].y - q.adjusted[i].y);
+            if (q.adjusted[pair].y < omega) {
+              q.visible = false;
+              break;
             }
+
+            float x0 = q.adjusted[i].x;
+            float y0 = q.adjusted[i].y;
+            float x1 = q.adjusted[pair].x;
+            float y1 = q.adjusted[pair].y;
+
+            float delta = (omega - y0) / (y1 - y0);
+
+            q.adjusted[i].x = q.adjusted[i].x +
+                              delta * (q.adjusted[pair].x - q.adjusted[i].x);
+
+            q.adjusted[i].y = q.adjusted[i].y +
+                              delta * (q.adjusted[pair].y - q.adjusted[i].y);
           }
         }
       }
@@ -282,61 +316,114 @@ class Olc3d2 : public olc::PixelGameEngine {
       float dotProduct = q.centre.x * q.normal.x + q.centre.y * q.normal.y +
                          q.centre.z * q.normal.z;
 
+      q.zOrder = 0;
+      for (int i = 0; i < 4; i++) {
+        q.zOrder += q.adjusted[i].y;
+        q.projected[i] = {
+            w / 2 - (q.adjusted[i].x * 800) / (q.adjusted[i].y + omega),
+            h / 2 + (q.adjusted[i].z * 800) / (q.adjusted[i].y + omega)};
+      }
+      q.zOrder /= 4;
+
+      if (q.partials.size() > 0) {
+        q.projectedPartials.clear();
+        for (auto partial : q.partials) {
+          std::array<olc::vf2d, 4> projected;
+
+          for (int i = 0; i < 4; i++) {
+            projected[i].x =
+                w / 2 - (partial[i].x * 800) / (partial[i].y + omega);
+            projected[i].y =
+                h / 2 + (partial[i].z * 800) / (partial[i].y + omega);
+          }
+
+          q.projectedPartials.push_back(projected);
+        }
+      }
+
       if (dotProduct < 0) {
         q.visible = false;
       }
     }
 
-    Clear(olc::VERY_DARK_BLUE);
+    Clear(olc::BLACK);
 
-    DrawLine(0, h / 2, w, h / 2, olc::BLUE);
-    DrawLine(0, h / 2 - unit / 2, w, h / 2 - unit / 2, olc::MAGENTA);
-    DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
+    if (!GetKey(olc::Key::TAB).bHeld) {
+      sortedQuads.clear();
+      for (auto& quad : quads) {
+        sortedQuads.push_back(&quad);
+      }
 
-    for (auto q : quads) {
-      if (q.partials.size() > 0) {
-        for (auto p : q.partials) {
-          DrawLine(-p[0].x + w / 2, -p[0].y + h / 2, -p[1].x + w / 2,
-                   -p[1].y + h / 2, olc::YELLOW);
+      std::sort(sortedQuads.begin(), sortedQuads.end(),
+                [](quad* a, quad* b) { return a->zOrder > b->zOrder; });
 
-          DrawLine(-p[1].x + w / 2, -p[1].y + h / 2, -p[2].x + w / 2,
-                   -p[2].y + h / 2, olc::YELLOW);
+      for (auto& q : sortedQuads) {
+        float dotProduct = q->centre.x * q->normal.x +
+                           q->centre.y * q->normal.y +
+                           q->centre.z * q->normal.z;
 
-          DrawLine(-p[2].x + w / 2, -p[2].y + h / 2, -p[3].x + w / 2,
-                   -p[3].y + h / 2, olc::YELLOW);
-
-          DrawLine(-p[3].x + w / 2, -p[3].y + h / 2, -p[0].x + w / 2,
-                   -p[0].y + h / 2, olc::YELLOW);
+        if (q->zOrder > -omega && dotProduct > 0) {
+          if (q->partials.size() > 0) {
+            for (auto& p : q->projectedPartials) {
+              DrawWarpedDecal(plasma.decal, p);
+            }
+          }
+          if (q->visible) {
+            DrawWarpedDecal(plasma.decal, q->projected);
+          }
         }
+      }
 
-      } else if (q.visible) {
-        DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 q.wall ? olc::GREEN : olc::DARK_CYAN);
-        DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 q.wall ? olc::GREEN : olc::DARK_CYAN);
-        DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 q.wall ? olc::GREEN : olc::DARK_CYAN);
-        DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 q.wall ? olc::GREEN : olc::DARK_CYAN);
-        FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
+    } else {
+      DrawLine(0, h / 2, w, h / 2, olc::BLUE);
+      DrawLine(0, h / 2 - unit / 2, w, h / 2 - unit / 2, olc::MAGENTA);
+      DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
+
+      for (auto q : quads) {
+        if (q.partials.size() > 0) {
+          for (auto p : q.partials) {
+            DrawLine(-p[0].x + w / 2, -p[0].y + h / 2, -p[1].x + w / 2,
+                     -p[1].y + h / 2, olc::YELLOW);
+
+            DrawLine(-p[1].x + w / 2, -p[1].y + h / 2, -p[2].x + w / 2,
+                     -p[2].y + h / 2, olc::YELLOW);
+
+            DrawLine(-p[2].x + w / 2, -p[2].y + h / 2, -p[3].x + w / 2,
+                     -p[3].y + h / 2, olc::YELLOW);
+
+            DrawLine(-p[3].x + w / 2, -p[3].y + h / 2, -p[0].x + w / 2,
+                     -p[0].y + h / 2, olc::YELLOW);
+          }
+
+        } else if (q.visible) {
+          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
                    q.wall ? olc::GREEN : olc::DARK_CYAN);
-      } else {
-        DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   q.wall ? olc::GREEN : olc::DARK_CYAN);
+          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   q.wall ? olc::GREEN : olc::DARK_CYAN);
+          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   q.wall ? olc::GREEN : olc::DARK_CYAN);
+          FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
+                     q.wall ? olc::GREEN : olc::DARK_CYAN);
+        } else {
+          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+        }
       }
     }
 
