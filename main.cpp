@@ -140,45 +140,92 @@ class Olc3d2 : public olc::PixelGameEngine {
         q.partials.clear();
       }
 
-      for (int i = 0; i < 4; i++) {
-        if (q.adjusted[i].y < omega) {
-          if (!q.wall) {
-            if (q.adjusted[0].y < omega && q.adjusted[1].y < omega &&
-                q.adjusted[2].y < omega && q.adjusted[3].y < omega) {
-              q.visible = false;
-              break;
-            } else if (q.adjusted[0].y < omega || q.adjusted[1].y < omega ||
-                       q.adjusted[2].y < omega || q.adjusted[3].y < omega) {
-              int n = 0;
-              float nY = 0;
-              for (int j = 0; j < 4; j++) {
-                if (q.adjusted[j].y > nY) {
-                  nY = q.adjusted[j].y;
-                  n = j;
-                }
-              }
+      if (!q.wall) {
+        int lostCornerCount = 0;
 
-              float alpha = 0.75;
-              float beta = 0.25;
+        for (int j = 0; j < 4; j++) {
+          if (q.adjusted[j].y < omega) lostCornerCount++;
+        }
 
-              float x1 = q.adjusted[n].x;
-              float y1 = q.adjusted[n].y;
-              float x2 = x1 + (q.adjusted[(n + 1) % 4].x - x1) * alpha;
-              float y2 = y1 + (q.adjusted[(n + 1) % 4].y - y1) * alpha;
-              float x4 = x1 + (q.adjusted[(n + 3) % 4].x - x1) * beta;
-              float y4 = y1 + (q.adjusted[(n + 3) % 4].y - y1) * beta;
-              float x3 = x1 + (x2 - x1) + (x4 - x1);
-              float y3 = y1 + (y2 - y1) + (y4 - y1);
+        if (lostCornerCount > 0) {
+          q.visible = false;
+        }
 
-              q.partials.push_back({vertex(x1, y1, q.adjusted[0].z, -1),
-                                    vertex(x2, y2, q.adjusted[1].z, -1),
-                                    vertex(x3, y3, q.adjusted[2].z, -1),
-                                    vertex(x4, y4, q.adjusted[3].z, -1)});
-
-              break;
+        if (lostCornerCount == 2) {
+          int n = 0;
+          float nY = 0;
+          for (int j = 0; j < 4; j++) {
+            if (q.adjusted[j].y > nY) {
+              nY = q.adjusted[j].y;
+              n = j;
             }
+          }
 
+          float x0 = q.adjusted[n].x;
+          float y0 = q.adjusted[n].y;
+
+          float x1 = q.adjusted[(n + 1) % 4].x;
+          float y1 = q.adjusted[(n + 1) % 4].y;
+          float d1 = std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2));
+          float dx1 = (x1 - x0) / d1;
+          float dy1 = (y1 - y0) / d1;
+
+          float x2 = q.adjusted[(n + 3) % 4].x;
+          float y2 = q.adjusted[(n + 3) % 4].y;
+          float d2 = std::sqrt(std::pow(x2 - x0, 2) + std::pow(y2 - y0, 2));
+          float dx2 = (x2 - x0) / d2;
+          float dy2 = (y2 - y0) / d2;
+
+          float alpha = 1, beta = 1;
+
+          if (y1 >= omega) {
+            alpha = 1 * d1;
+            beta = 0.25 * d2;
+          } else if (y2 >= omega) {
+            alpha = 0.25 * d1;
+            beta = 1 * d2;
           } else {
+            continue;
+          }
+
+          q.partials.push_back(
+              {vertex(x0, y0, q.adjusted[n].z, -1),
+               vertex(x0 + dx1 * alpha, y0 + dy1 * alpha, q.adjusted[n].z, -1),
+               vertex(x0 + dx1 * alpha + dx2 * beta,
+                      y0 + dy1 * alpha + dy2 * beta, q.adjusted[n].z, -1),
+               vertex(x0 + dx2 * beta, y0 + dy2 * beta, q.adjusted[n].z, -1)});
+
+        } else if (lostCornerCount == 1) {
+          int n = 0;
+          float nY = 0;
+          for (int j = 0; j < 4; j++) {
+            if (q.adjusted[j].y > nY) {
+              nY = q.adjusted[j].y;
+              n = j;
+            }
+          }
+
+          float alpha = 0.25;
+          float beta = 0.25;
+
+          float x1 = q.adjusted[n].x;
+          float y1 = q.adjusted[n].y;
+          float x2 = x1 + (q.adjusted[(n + 1) % 4].x - x1) * alpha;
+          float y2 = y1 + (q.adjusted[(n + 1) % 4].y - y1) * alpha;
+          float x4 = x1 + (q.adjusted[(n + 3) % 4].x - x1) * beta;
+          float y4 = y1 + (q.adjusted[(n + 3) % 4].y - y1) * beta;
+          float x3 = x1 + (x2 - x1) + (x4 - x1);
+          float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+          q.partials.push_back({vertex(x1, y1, q.adjusted[n].z, -1),
+                                vertex(x2, y2, q.adjusted[n].z, -1),
+                                vertex(x3, y3, q.adjusted[n].z, -1),
+                                vertex(x4, y4, q.adjusted[n].z, -1)});
+        }
+
+      } else {
+        for (int i = 0; i < 4; i++) {
+          if (q.adjusted[i].y < omega) {
             int pair = q.vertices[i].pair;
 
             if (q.adjusted[pair].y < omega) {
@@ -246,6 +293,8 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     for (auto q : quads) {
       if (q.partials.size() > 0) {
+        //FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3, olc::YELLOW);
+
         for (auto p : q.partials) {
           DrawLine(-p[0].x + w / 2, -p[0].y + h / 2, -p[1].x + w / 2,
                    -p[1].y + h / 2, olc::YELLOW);
