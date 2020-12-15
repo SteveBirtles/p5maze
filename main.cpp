@@ -22,7 +22,9 @@ struct Renderable {
   olc::Decal* decal = nullptr;
 };
 
-Renderable plasma;
+Renderable plasmaTexture;
+Renderable wallTexture;
+Renderable floorTexture;
 
 struct vertex {
   float x;
@@ -38,23 +40,42 @@ struct vertex {
   }
 };
 
+struct partial {
+  olc::vi2d sourcePos;
+  olc::vi2d sourceSize;
+  std::array<olc::vf2d, 4> projected;
+  std::array<vertex, 4> adjusted;
+  olc::Pixel colour;
+  partial(std::array<vertex, 4> _adjusted, std::array<int, 4> _texture,
+          olc::Pixel _colour = olc::WHITE) {
+    sourcePos.x = _texture[0];
+    sourcePos.y = _texture[1];
+    sourceSize.x = _texture[2];
+    sourceSize.y = _texture[3];
+    adjusted = _adjusted;
+    colour = _colour;
+  }
+};
+
 struct quad {
   std::array<vertex, 4> vertices;
   std::array<vertex, 4> adjusted;
-  std::vector<std::array<vertex, 4>> partials;
   bool visible;
   bool wall;
   float zOrder;
   olc::vf2d projected[4];
-  std::vector<std::array<olc::vf2d, 4>> projectedPartials;
+  std::vector<partial> partials;
   vertex normal;
   vertex centre;
-  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall) {
+  olc::Pixel colour;
+  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall,
+       olc::Pixel _colour = olc::WHITE) {
     vertices[0] = _p0;
     vertices[1] = _p1;
     vertices[2] = _p2;
     vertices[3] = _p3;
     wall = _wall;
+    colour = _colour;
   }
 };
 
@@ -69,7 +90,9 @@ class Olc3d2 : public olc::PixelGameEngine {
 
  public:
   bool OnUserCreate() override {
-    plasma.Load("./plasma.png");
+    plasmaTexture.Load("./plasma.png");
+    wallTexture.Load("./wall.png");
+    floorTexture.Load("./floor.png");
 
     std::srand(std::time(nullptr));
 
@@ -102,20 +125,20 @@ class Olc3d2 : public olc::PixelGameEngine {
       float x3 = x1 + (x2 - x1) + (x4 - x1);
       float y3 = y1 + (y2 - y1) + (y4 - y1);
 
-      quads.push_back(quad(vertex(x1, y1, unit, 1), vertex(x2, y2, unit, 0),
-                           vertex(x2, y2, 0.0f, 3), vertex(x1, y1, 0.0f, 2),
+      quads.push_back(quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
+                           vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0),
                            true));
 
-      quads.push_back(quad(vertex(x2, y2, unit, 1), vertex(x3, y3, unit, 0),
-                           vertex(x3, y3, 0.0f, 3), vertex(x2, y2, 0.0f, 2),
+      quads.push_back(quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
+                           vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0),
                            true));
 
-      quads.push_back(quad(vertex(x3, y3, unit, 1), vertex(x4, y4, unit, 0),
-                           vertex(x4, y4, 0.0f, 3), vertex(x3, y3, 0.0f, 2),
+      quads.push_back(quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
+                           vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0),
                            true));
 
-      quads.push_back(quad(vertex(x4, y4, unit, 1), vertex(x1, y1, unit, 0),
-                           vertex(x1, y1, 0.0f, 3), vertex(x4, y4, 0.0f, 2),
+      quads.push_back(quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
+                           vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0),
                            true));
     }
 
@@ -123,13 +146,22 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   float angle = 0;
+  float pitch = 0;
   float myX = 0;
   float myY = 0;
-  float myZ = -unit / 2;
+  float myZ = unit / 2;
 
   bool OnUserUpdate(float fElapsedTime) override {
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
+
+    if (GetKey(olc::Key::PGDN).bHeld) pitch += 0.025;
+    if (GetKey(olc::Key::PGUP).bHeld) pitch -= 0.025;
+
+    if (GetKey(olc::Key::HOME).bHeld) pitch = 0;
+
+    if (pitch < -1.571) pitch = -1.571;
+    if (pitch > 1.571) pitch = 1.571;
 
     if (GetKey(olc::Key::W).bHeld) {
       myX += std::sin(angle) * 5;
@@ -148,16 +180,25 @@ class Olc3d2 : public olc::PixelGameEngine {
       myY -= -std::sin(angle) * 5;
     }
 
-    if (GetKey(olc::Key::R).bHeld) {
-      myZ -= 5;
-    }
-    if (GetKey(olc::Key::F).bHeld) {
-      myZ += 5;
-    }
+    if (GetKey(olc::Key::R).bHeld) myZ -= 5;
+    if (GetKey(olc::Key::F).bHeld) myZ += 5;
+    if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
 
-    float m[3][3] = {{std::cos(angle), -std::sin(angle), 0},
-                     {std::sin(angle), std::cos(angle), 0},
-                     {0, 0, 1}};
+    float m1[3][3] = {{1, 0, 0},
+                      {0, std::cos(pitch), std::sin(pitch)},
+                      {0, -std::sin(pitch), std::cos(pitch)}};
+
+    float m2[3][3] = {{std::cos(angle), -std::sin(angle), 0},
+                      {std::sin(angle), std::cos(angle), 0},
+                      {0, 0, 1}};
+
+    float m[3][3];
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        m[i][j] =
+            m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j] + m1[i][2] * m2[2][j];
+      }
+    }
 
     for (auto& q : quads) {
       for (int i = 0; i < 4; i++) {
@@ -197,9 +238,11 @@ class Olc3d2 : public olc::PixelGameEngine {
 
             float x0 = q.adjusted[n].x;
             float y0 = q.adjusted[n].y;
+            float z0 = q.adjusted[n].z;
 
             float x3 = q.adjusted[(n + 2) % 4].x;
             float y3 = q.adjusted[(n + 2) % 4].y;
+            float z3 = q.adjusted[(n + 2) % 4].z;
 
             float d0 = std::sqrt(std::pow(x3 - x0, 2) + std::pow(y3 - y0, 2));
             float dx0 = (x3 - x0) / d0;
@@ -211,63 +254,190 @@ class Olc3d2 : public olc::PixelGameEngine {
 
             float x1 = q.adjusted[(n + 1) % 4].x;
             float y1 = q.adjusted[(n + 1) % 4].y;
-            float d1 = std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2));
+            float z1 = q.adjusted[(n + 1) % 4].z;
+            float d1 = std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2) +
+                                 std::pow(z1 - z0, 2));
             float dx1 = (x1 - x0) / d1;
             float dy1 = (y1 - y0) / d1;
+            float dz1 = (z1 - z0) / d1;
 
             float x2 = q.adjusted[(n + 3) % 4].x;
             float y2 = q.adjusted[(n + 3) % 4].y;
-            float d2 = std::sqrt(std::pow(x2 - x0, 2) + std::pow(y2 - y0, 2));
+            float z2 = q.adjusted[(n + 3) % 4].z;
+            float d2 = std::sqrt(std::pow(x2 - x0, 2) + std::pow(y2 - y0, 2) +
+                                 std::pow(z2 - z0, 2));
             float dx2 = (x2 - x0) / d2;
             float dy2 = (y2 - y0) / d2;
+            float dz2 = (z2 - z0) / d2;
 
             float alpha = (lambdaX - x0) * dx1 + (lambdaY - y0) * dy1;
-            float beta = (lambdaX - x0) * dx2 + (lambdaY - y0) * dy2;
 
             float xAlpha = x0 + dx1 * alpha;
             float yAlpha = y0 + dy1 * alpha;
+            float zAlpha = z0 + dz1 * alpha;
 
-            float xBeta = x0 + dx2 * beta;
-            float yBeta = y0 + dy2 * beta;
+            float xBeta = x0 + dx2 * alpha;
+            float yBeta = y0 + dy2 * alpha;
+            float zBeta = z0 + dz2 * alpha;
 
-            float xGamma = x0 + dx1 * alpha + dx2 * beta;
-            float yGamma = y0 + dy1 * alpha + dy2 * beta;
+            float xGamma = x0 + dx1 * alpha + dx2 * alpha;
+            float yGamma = y0 + dy1 * alpha + dy2 * alpha;
+            float zGamma = z0 + dz1 * alpha + dz2 * alpha;
 
-            q.partials.push_back({vertex(x0, y0, q.adjusted[n].z, -1),
-                                  vertex(xAlpha, yAlpha, q.adjusted[n].z, -1),
-                                  vertex(xGamma, yGamma, q.adjusted[n].z, -1),
-                                  vertex(xBeta, yBeta, q.adjusted[n].z, -1)});
+            vertex vs[4] = {vertex(x0, y0, z0, -1),
+                            vertex(xAlpha, yAlpha, zAlpha, -1),
+                            vertex(xGamma, yGamma, zGamma, -1),
+                            vertex(xBeta, yBeta, zBeta, -1)};
+
+            float u, v, du, dv;
+            std::vector<int> order;
+
+            if (n == 0) {
+              u = 0;
+              v = 0;
+              du = 512 * alpha / d1;
+              dv = 512 * alpha / d2;
+              order = {0, 1, 2, 3};
+            }
+
+            if (n == 1) {
+              u = 0;
+              v = 512 * (1 - alpha / d2);
+              du = 512 * alpha / d1;
+              dv = 512 * alpha / d2;
+              order = {3, 0, 1, 2};
+            }
+
+            if (n == 2) {
+              u = 512 * (1 - alpha / d1);
+              v = 512 * (1 - alpha / d2);
+              du = 512 * alpha / d1;
+              dv = 512 * alpha / d2;
+              order = {2, 3, 0, 1};
+            }
+
+            if (n == 3) {
+              u = 512 * (1 - alpha / d1);
+              v = 0;
+              du = 512 * alpha / d1;
+              dv = 512 * alpha / d2;
+              order = {1, 2, 3, 0};
+            }
+
+            q.partials.push_back(partial(
+                {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
+                {static_cast<int>(u), static_cast<int>(v), static_cast<int>(du),
+                 static_cast<int>(dv)}));
 
             if (y1 >= omega) {
               float yTheta = omega;
               float theta = (yTheta - y1) / (y3 - y1);
               float xTheta = x1 + theta * (x3 - x1);
+              float zTheta = z1 + theta * (z3 - z1);
 
-              q.partials.push_back({
-                  vertex(xAlpha, yAlpha, q.adjusted[n].z, -1),
-                  vertex(x1, y1, q.adjusted[n].z, -1),
-                  vertex(xTheta, yTheta, q.adjusted[n].z, -1),
+              vertex vs[4]{
+                  vertex(xAlpha, yAlpha, zAlpha, -1), vertex(x1, y1, z1, -1),
+                  vertex(xTheta, yTheta, zTheta, -1),
                   vertex(xTheta - (x1 - xAlpha), yTheta - (y1 - yAlpha),
-                         q.adjusted[n].z, -1),
-              });
+                         zTheta - (z1 - zAlpha), -1)};
+
+              float u, v, du, dv;
+              std::vector<int> order;
+
+              if (n == 0) {
+                u = 0;
+                v = 512 * alpha / d1;
+                du = 512 * theta;
+                dv = 512 * (1 - alpha / d1);
+                order = {0, 1, 2, 3};
+              }
+
+              if (n == 1) {
+                u = 512 * alpha / d1;
+                v = 512 * (1 - theta);
+                du = 512 * (1 - alpha / d1);
+                dv = 512 * theta;
+                order = {3, 0, 1, 2};
+              }
+
+              if (n == 2) {
+                u = 512 * (1 - theta);
+                v = 0;
+                du = 512 * theta;
+                dv = 512 * (1 - alpha / d1);
+                order = {2, 3, 0, 1};
+              }
+
+              if (n == 3) {
+                u = 0;
+                v = 0;
+                du = 512 * (1 - alpha / d1);
+                dv = 512 * theta;
+                order = {1, 2, 3, 0};
+              }
+
+              q.partials.push_back(partial(
+                  {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
+                  {static_cast<int>(u), static_cast<int>(v),
+                   static_cast<int>(du), static_cast<int>(dv)}));
             }
 
             if (y2 >= omega) {
               float yTheta = omega;
               float theta = (yTheta - y2) / (y3 - y2);
               float xTheta = x2 + theta * (x3 - x2);
+              float zTheta = z2 + theta * (z3 - z2);
 
-              q.partials.push_back({
-                  vertex(xBeta, yBeta, q.adjusted[n].z, -1),
-                  vertex(x2, y2, q.adjusted[n].z, -1),
-                  vertex(xTheta, yTheta, q.adjusted[n].z, -1),
+              vertex vs[4]{
+                  vertex(xBeta, yBeta, zBeta, -1),
                   vertex(xTheta - (x2 - xBeta), yTheta - (y2 - yBeta),
-                         q.adjusted[n].z, -1),
-              });
+                         zTheta - (z2 - zBeta), -1),
+                  vertex(xTheta, yTheta, zTheta, -1),
+                  vertex(x2, y2, z2, -1),
+              };
+
+              float u, v, du, dv;
+              std::vector<int> order;
+
+              if (n == 0) {
+                u = 512 * alpha / d1;
+                v = 0;
+                du = 512 * (1 - alpha / d1);
+                dv = 512 * theta;
+                order = {0, 1, 2, 3};
+              }
+
+              if (n == 1) {
+                u = 0;
+                v = 0;
+                du = 512 * theta;
+                dv = 512 * (1 - alpha / d1);
+                order = {3, 0, 1, 2};
+              }
+
+              if (n == 2) {
+                u = 0;
+                v = 512 * (1 - theta);
+                du = 512 * (1 - alpha / d1);
+                dv = 512 * theta;
+                order = {2, 3, 0, 1};
+              }
+
+              if (n == 3) {
+                u = 512 * (1 - theta);
+                v = 512 * alpha / d1;
+                du = 512 * theta;
+                dv = 512 * (1 - alpha / d1);
+                order = {1, 2, 3, 0};
+              }
+
+              q.partials.push_back(partial(
+                  {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
+                  {static_cast<int>(u), static_cast<int>(v),
+                   static_cast<int>(du), static_cast<int>(dv)}));
             }
           }
         }
-
       } else {
         for (int i = 0; i < 4; i++) {
           if (q.adjusted[i].y < omega) {
@@ -326,18 +496,13 @@ class Olc3d2 : public olc::PixelGameEngine {
       q.zOrder /= 4;
 
       if (q.partials.size() > 0) {
-        q.projectedPartials.clear();
-        for (auto partial : q.partials) {
-          std::array<olc::vf2d, 4> projected;
-
+        for (auto& p : q.partials) {
           for (int i = 0; i < 4; i++) {
-            projected[i].x =
-                w / 2 - (partial[i].x * 800) / (partial[i].y + omega);
-            projected[i].y =
-                h / 2 + (partial[i].z * 800) / (partial[i].y + omega);
+            p.projected[i].x =
+                w / 2 - (p.adjusted[i].x * 800) / (p.adjusted[i].y + omega);
+            p.projected[i].y =
+                h / 2 + (p.adjusted[i].z * 800) / (p.adjusted[i].y + omega);
           }
-
-          q.projectedPartials.push_back(projected);
         }
       }
 
@@ -362,54 +527,85 @@ class Olc3d2 : public olc::PixelGameEngine {
                            q->centre.y * q->normal.y +
                            q->centre.z * q->normal.z;
 
+        auto decal = plasmaTexture.decal;
+        if (q->wall) {
+          decal = wallTexture.decal;
+        } else {
+          decal = floorTexture.decal;
+        }
+
         if (q->zOrder > -omega && dotProduct > 0) {
           if (q->partials.size() > 0) {
-            for (auto& p : q->projectedPartials) {
-              DrawWarpedDecal(plasma.decal, p);
+            for (auto& p : q->partials) {
+              DrawPartialWarpedDecal(decal, p.projected, p.sourcePos,
+                                     p.sourceSize, p.colour);
             }
           }
           if (q->visible) {
-            DrawWarpedDecal(plasma.decal, q->projected);
+            DrawWarpedDecal(decal, q->projected, q->colour);
           }
         }
       }
 
     } else {
       DrawLine(0, h / 2, w, h / 2, olc::BLUE);
-      DrawLine(0, h / 2 - unit / 2, w, h / 2 - unit / 2, olc::MAGENTA);
       DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
 
       for (auto q : quads) {
         if (q.partials.size() > 0) {
           for (auto p : q.partials) {
-            DrawLine(-p[0].x + w / 2, -p[0].y + h / 2, -p[1].x + w / 2,
-                     -p[1].y + h / 2, olc::YELLOW);
+            olc::vf2d pv[4] = {
+                {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
+                {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
+                {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
+                {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
 
-            DrawLine(-p[1].x + w / 2, -p[1].y + h / 2, -p[2].x + w / 2,
-                     -p[2].y + h / 2, olc::YELLOW);
+            DrawPartialWarpedDecal(floorTexture.decal, pv, p.sourcePos,
+                                   p.sourceSize, p.colour);
 
-            DrawLine(-p[2].x + w / 2, -p[2].y + h / 2, -p[3].x + w / 2,
-                     -p[3].y + h / 2, olc::YELLOW);
+            DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                     -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                     olc::YELLOW);
 
-            DrawLine(-p[3].x + w / 2, -p[3].y + h / 2, -p[0].x + w / 2,
-                     -p[0].y + h / 2, olc::YELLOW);
+            DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                     -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                     olc::YELLOW);
+
+            DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                     -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                     olc::YELLOW);
+
+            DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                     -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                     olc::YELLOW);
           }
 
         } else if (q.visible) {
-          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   q.wall ? olc::GREEN : olc::DARK_CYAN);
-          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   q.wall ? olc::GREEN : olc::DARK_CYAN);
-          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   q.wall ? olc::GREEN : olc::DARK_CYAN);
-          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   q.wall ? olc::GREEN : olc::DARK_CYAN);
-          FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
-                     q.wall ? olc::GREEN : olc::DARK_CYAN);
+          if (!q.wall) {
+            olc::vf2d pv[4] = {
+                {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
+                {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
+                {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
+                {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
+
+            DrawWarpedDecal(floorTexture.decal, pv, q.colour);
+
+          } else {
+            DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                     -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                     olc::GREEN);
+            DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                     -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                     olc::GREEN);
+            DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                     -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                     olc::GREEN);
+            DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                     -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                     olc::GREEN);
+            FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3, olc::GREEN);
+          }
+
         } else {
           DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
                    -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
