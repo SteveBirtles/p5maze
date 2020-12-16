@@ -60,6 +60,8 @@ struct partial {
 struct quad {
   std::array<vertex, 4> vertices;
   std::array<vertex, 4> adjusted;
+  olc::vi2d sourcePos;
+  olc::vi2d sourceSize;
   bool visible;
   bool wall;
   float zOrder;
@@ -74,6 +76,10 @@ struct quad {
     vertices[1] = _p1;
     vertices[2] = _p2;
     vertices[3] = _p3;
+    sourcePos.x = 0;
+    sourcePos.y = 0;
+    sourceSize.x = 512;
+    sourceSize.y = 512;
     wall = _wall;
     colour = _colour;
   }
@@ -82,7 +88,216 @@ struct quad {
 std::vector<quad> quads;
 std::vector<quad*> sortedQuads;
 
-float unit = 100;
+enum class mapCell { wall, corridor, room };
+
+struct mazeCell {
+  int set;
+  bool right;
+  bool down;
+};
+
+const float unit = 100;
+const int mazeWidth = 40;
+const int mazeHeight = 40;
+
+mapCell map[mazeWidth * 2 + 1][mazeHeight * 2 + 1];
+mazeCell maze[mazeWidth][mazeHeight];
+
+bool kruskalStep() {
+  bool oneSet = true;
+  for (int i = 0; i < mazeWidth; i++) {
+    for (int j = 0; j < mazeHeight; j++) {
+      if (maze[i][j].set != maze[0][0].set) {
+        oneSet = false;
+      }
+    }
+  }
+  if (oneSet) return true;
+
+  int x, y, a, b, horizontal = 0, vertical = 0;
+
+  while (true) {
+    x = std::rand() % mazeWidth;
+    y = std::rand() % mazeHeight;
+
+    if (std::rand() % 2 == 0) {
+      horizontal = 1;
+      vertical = 0;
+    } else {
+      horizontal = 0;
+      vertical = 1;
+    }
+
+    if (horizontal > 0 && (maze[x][y].right || x == mazeWidth - 1)) continue;
+    if (vertical > 0 && (maze[x][y].down || y == mazeHeight - 1)) continue;
+
+    a = maze[x][y].set;
+    b = maze[x + horizontal][y + vertical].set;
+
+    if (a == b) continue;
+
+    if (vertical > 0) {
+      maze[x][y].down = true;
+    } else {
+      maze[x][y].right = true;
+    }
+    for (int i = 0; i < mazeWidth; i++) {
+      for (int j = 0; j < mazeHeight; j++) {
+        if (maze[i][j].set == b) {
+          maze[i][j].set = a;
+        }
+      }
+    }
+
+    return false;
+  }
+}
+
+void randomiseMap() {
+  quads.clear();
+
+  int n = 0;
+  for (int i = 0; i < mazeWidth; i++) {
+    for (int j = 0; j < mazeHeight; j++) {
+      n++;
+      maze[i][j].set = n;
+      maze[i][j].right = false;
+      maze[i][j].down = false;
+    }
+  }
+
+  bool mazeDone = false;
+  while (!mazeDone) {
+    mazeDone = kruskalStep();
+  }
+
+  for (int i = -mazeWidth; i <= mazeWidth; i++) {
+    for (int j = -mazeHeight; j < mazeHeight; j++) {
+      map[i + mazeWidth][j + mazeHeight] =
+          (i + mazeWidth) % 2 == 1 && (j + mazeHeight) % 2 == 1
+              ? mapCell::corridor
+              : mapCell::wall;
+    }
+  }
+
+  for (int i = 0; i < mazeWidth; i++) {
+    for (int j = 0; j < mazeHeight; j++) {
+      if (maze[i][j].right) map[i * 2 + 2][j * 2 + 1] = mapCell::corridor;
+      if (maze[i][j].down) map[i * 2 + 1][j * 2 + 2] = mapCell::corridor;
+    }
+  }
+
+  for (int r = 0; r < 10; r++) {
+    int rw = std::rand() % 10 + 5;
+    int rh = std::rand() % 10 + 5;
+    int x = std::rand() % (mazeWidth * 2 - rw);
+    int y = std::rand() % (mazeWidth * 2 - rh);
+    for (int i = x; i <= x + rw; i++) {
+      for (int j = y; j <= y + rh; j++) {
+        map[i][j] = mapCell::room;
+      }
+    }
+  }
+
+  for (int i = -mazeWidth; i < mazeWidth; i++) {
+    for (int j = -mazeHeight; j <= mazeHeight; j++) {
+      float x1 = unit * i;
+      float y1 = unit * j;
+      float x2 = x1 + unit;
+      float y2 = y1;
+      float x4 = x1;
+      float y4 = y1 + unit;
+      float x3 = x1 + (x2 - x1) + (x4 - x1);
+      float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+      if (map[i + mazeWidth][j + mazeHeight] == mapCell::corridor ||
+          map[i + mazeWidth][j + mazeHeight] == mapCell::room) {
+        quads.push_back(quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
+                             vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1),
+                             false));
+
+        if (map[i + mazeWidth][j + mazeHeight] == mapCell::corridor) {
+          quads.push_back(quad(vertex(x4, y4, 0, -1), vertex(x3, y3, 0, -1),
+                               vertex(x2, y2, 0, -1), vertex(x1, y1, 0, -1),
+                               false));
+        }
+
+        if (map[i + mazeWidth][j + mazeHeight] == mapCell::room) {
+          quads.push_back(quad(vertex(x4, y4, -unit * 2, -1),
+                               vertex(x3, y3, -unit * 2, -1),
+                               vertex(x2, y2, -unit * 2, -1),
+                               vertex(x1, y1, -unit * 2, -1), false));
+        }
+
+      } else if (map[i + mazeWidth][j + mazeHeight] == mapCell::wall) {
+        if (j > -mazeHeight &&
+            map[i + mazeWidth][j + mazeHeight - 1] != mapCell::wall) {
+          quads.push_back(quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
+                               vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0),
+                               true));
+        }
+
+        if (i < mazeWidth - 1 &&
+            map[i + mazeWidth + 1][j + mazeHeight] != mapCell::wall) {
+          quads.push_back(quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
+                               vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0),
+                               true));
+        }
+
+        if (j < mazeHeight - 1 &&
+            map[i + mazeWidth][j + mazeHeight + 1] != mapCell::wall) {
+          quads.push_back(quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
+                               vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0),
+                               true));
+        }
+
+        if (i > -mazeHeight &&
+            map[i + mazeWidth - 1][j + mazeHeight] != mapCell::wall) {
+          quads.push_back(quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
+                               vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0),
+                               true));
+        }
+      }
+
+      if (map[i + mazeWidth][j + mazeHeight] == mapCell::corridor ||
+          map[i + mazeWidth][j + mazeHeight] == mapCell::wall) {
+        for (int k = 0; k > -2; k--) {
+          if (j > -mazeHeight &&
+              map[i + mazeWidth][j + mazeHeight - 1] == mapCell::room) {
+            quads.push_back(quad(vertex(x2, y2, k * unit, 3),
+                                 vertex(x2, y2, k * unit - unit, 2),
+                                 vertex(x1, y1, k * unit - unit, 1),
+                                 vertex(x1, y1, k * unit, 0), true));
+          }
+
+          if (i < mazeWidth - 1 &&
+              map[i + mazeWidth + 1][j + mazeHeight] == mapCell::room) {
+            quads.push_back(quad(vertex(x3, y3, k * unit, 3),
+                                 vertex(x3, y3, k * unit - unit, 2),
+                                 vertex(x2, y2, k * unit - unit, 1),
+                                 vertex(x2, y2, k * unit, 0), true));
+          }
+
+          if (j < mazeHeight - 1 &&
+              map[i + mazeWidth][j + mazeHeight + 1] == mapCell::room) {
+            quads.push_back(quad(vertex(x4, y4, k * unit, 3),
+                                 vertex(x4, y4, k * unit - unit, 2),
+                                 vertex(x3, y3, k * unit - unit, 1),
+                                 vertex(x3, y3, k * unit, 0), true));
+          }
+
+          if (i > -mazeHeight &&
+              map[i + mazeWidth - 1][j + mazeHeight] == mapCell::room) {
+            quads.push_back(quad(vertex(x1, y1, k * unit, 3),
+                                 vertex(x1, y1, k * unit - unit, 2),
+                                 vertex(x4, y4, k * unit - unit, 1),
+                                 vertex(x4, y4, k * unit, 0), true));
+          }
+        }
+      }
+    }
+  }
+}
 
 class Olc3d2 : public olc::PixelGameEngine {
  public:
@@ -93,62 +308,16 @@ class Olc3d2 : public olc::PixelGameEngine {
     plasmaTexture.Load("./plasma.png");
     wallTexture.Load("./wall.png");
     floorTexture.Load("./floor.png");
-
     std::srand(std::time(nullptr));
-
-    for (int i = -20; i < 20; i++) {
-      for (int j = -20; j < 20; j++) {
-        float x1 = i * unit;
-        float y1 = j * unit;
-        float x2 = x1 + unit;
-        float y2 = y1;
-        float x4 = x1;
-        float y4 = y1 + unit;
-        float x3 = x1 + (x2 - x1) + (x4 - x1);
-        float y3 = y1 + (y2 - y1) + (y4 - y1);
-
-        quads.push_back(quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
-                             vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1),
-                             false));
-      }
-    }
-
-    for (int i = 0; i < 100; i++) {
-      float x1 = unit * (rand() % 40 - 20);
-
-      float y1 = unit * (rand() % 40 - 20);
-
-      float x2 = x1 + unit;
-      float y2 = y1;
-      float x4 = x1;
-      float y4 = y1 + unit;
-      float x3 = x1 + (x2 - x1) + (x4 - x1);
-      float y3 = y1 + (y2 - y1) + (y4 - y1);
-
-      quads.push_back(quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
-                           vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0),
-                           true));
-
-      quads.push_back(quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
-                           vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0),
-                           true));
-
-      quads.push_back(quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
-                           vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0),
-                           true));
-
-      quads.push_back(quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
-                           vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0),
-                           true));
-    }
+    randomiseMap();
 
     return true;
   }
 
   float angle = 0;
   float pitch = 0;
-  float myX = 0;
-  float myY = 0;
+  float myX = unit / 2;
+  float myY = unit / 2;
   float myZ = unit / 2;
 
   bool OnUserUpdate(float fElapsedTime) override {
@@ -159,6 +328,8 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (GetKey(olc::Key::PGUP).bHeld) pitch -= 0.025;
 
     if (GetKey(olc::Key::HOME).bHeld) pitch = 0;
+
+    if (GetKey(olc::Key::M).bPressed) randomiseMap();
 
     if (pitch < -1.571) pitch = -1.571;
     if (pitch > 1.571) pitch = 1.571;
@@ -178,6 +349,50 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (GetKey(olc::Key::D).bHeld) {
       myX -= std::cos(angle) * 5;
       myY -= -std::sin(angle) * 5;
+    }
+
+    int mapX = myX / unit + mazeWidth;
+    int mapY = myY / unit + mazeHeight;
+
+    bool north = false, south = false, east = false, west = false;
+    float dNorth = 0, dSouth = 0, dEast = 0, dWest = 0;
+    double intBit;
+
+    if (mapX > 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
+        mapY < mazeWidth * 2 + 1) {
+      if (map[mapX - 1][mapY] == mapCell::wall) east = true;
+    }
+
+    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 &&
+        mapY < mazeWidth * 2 + 1) {
+      if (map[mapX + 1][mapY] == mapCell::wall) west = true;
+    }
+
+    if (mapX >= 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
+        mapY < mazeWidth * 2 + 1) {
+      if (map[mapX][mapY - 1] == mapCell::wall) north = true;
+    }
+
+    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
+        mapY < mazeWidth * 2) {
+      if (map[mapX][mapY + 1] == mapCell::wall) south = true;
+    }
+
+    if (east) {
+      dEast = std::modf(myX / unit + mazeWidth - mapX, &intBit);
+      if (dEast <= 0.25) myX += (0.25 - dEast) * unit;
+    }
+    if (west) {
+      dWest = 1 - std::modf(myX / unit + mazeWidth - mapX, &intBit);
+      if (dWest <= 0.25) myX -= (0.25 - dWest) * unit;
+    }
+    if (north) {
+      dNorth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+      if (dNorth <= 0.25) myY += (0.25 - dNorth) * unit;
+    }
+    if (south) {
+      dSouth = 1 - std::modf(myY / unit + mazeHeight - mapY, &intBit);
+      if (dSouth <= 0.25) myY -= (0.25 - dSouth) * unit;
     }
 
     if (GetKey(olc::Key::R).bHeld) myZ -= 5;
@@ -201,19 +416,31 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
 
     for (auto& q : quads) {
+      float maxX = 0;
+      float maxY = 0;
+      float maxZ = 0;
+
       for (int i = 0; i < 4; i++) {
         q.adjusted[i].x = (q.vertices[i].x - myX) * m[0][0] +
                           (q.vertices[i].y - myY) * m[0][1] +
                           (q.vertices[i].z - myZ) * m[0][2];
+        if (std::abs(q.adjusted[i].x) > maxX) maxX = std::abs(q.adjusted[i].x);
         q.adjusted[i].y = (q.vertices[i].x - myX) * m[1][0] +
                           (q.vertices[i].y - myY) * m[1][1] +
                           (q.vertices[i].z - myZ) * m[1][2];
+        if (std::abs(q.adjusted[i].y) > maxY) maxY = std::abs(q.adjusted[i].y);
         q.adjusted[i].z = (q.vertices[i].x - myX) * m[2][0] +
                           (q.vertices[i].y - myY) * m[2][1] +
                           (q.vertices[i].z - myZ) * m[2][2];
+        if (std::abs(q.adjusted[i].z) > maxZ) maxZ = std::abs(q.adjusted[i].z);
         q.visible = true;
 
         q.partials.clear();
+      }
+
+      if (maxX > 1500 || maxY > 1500 || maxZ > 1500) {
+        q.visible = false;
+        continue;
       }
 
       if (!q.wall) {
@@ -327,7 +554,8 @@ class Olc3d2 : public olc::PixelGameEngine {
             q.partials.push_back(partial(
                 {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                 {static_cast<int>(u), static_cast<int>(v), static_cast<int>(du),
-                 static_cast<int>(dv)}));
+                 static_cast<int>(dv)},
+                q.colour));
 
             if (y1 >= omega) {
               float yTheta = omega;
@@ -379,7 +607,8 @@ class Olc3d2 : public olc::PixelGameEngine {
               q.partials.push_back(partial(
                   {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                   {static_cast<int>(u), static_cast<int>(v),
-                   static_cast<int>(du), static_cast<int>(dv)}));
+                   static_cast<int>(du), static_cast<int>(dv)},
+                  q.colour));
             }
 
             if (y2 >= omega) {
@@ -434,11 +663,15 @@ class Olc3d2 : public olc::PixelGameEngine {
               q.partials.push_back(partial(
                   {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                   {static_cast<int>(u), static_cast<int>(v),
-                   static_cast<int>(du), static_cast<int>(dv)}));
+                   static_cast<int>(du), static_cast<int>(dv)},
+                  q.colour));
             }
           }
         }
       } else {
+        q.sourcePos.x = 0;
+        q.sourceSize.x = 512;
+
         for (int i = 0; i < 4; i++) {
           if (q.adjusted[i].y < omega) {
             int pair = q.vertices[i].pair;
@@ -460,6 +693,14 @@ class Olc3d2 : public olc::PixelGameEngine {
 
             q.adjusted[i].y = q.adjusted[i].y +
                               delta * (q.adjusted[pair].y - q.adjusted[i].y);
+
+            if (i > pair) {
+              q.sourcePos.x = 0;
+              q.sourceSize.x = 512 * (1 - delta);
+            } else {
+              q.sourcePos.x = delta * 512;
+              q.sourceSize.x = (1 - delta) * 512;
+            }
           }
         }
       }
@@ -486,16 +727,17 @@ class Olc3d2 : public olc::PixelGameEngine {
       float dotProduct = q.centre.x * q.normal.x + q.centre.y * q.normal.y +
                          q.centre.z * q.normal.z;
 
-      q.zOrder = 0;
-      for (int i = 0; i < 4; i++) {
-        q.zOrder += q.adjusted[i].y;
-        q.projected[i] = {
-            w / 2 - (q.adjusted[i].x * 800) / (q.adjusted[i].y + omega),
-            h / 2 + (q.adjusted[i].z * 800) / (q.adjusted[i].y + omega)};
-      }
-      q.zOrder /= 4;
+      q.zOrder = std::sqrt(std::pow(q.centre.x, 2) + std::pow(q.centre.y, 2) +
+                           std::pow(q.centre.z, 2));
 
-      if (q.partials.size() > 0) {
+      if (q.partials.size() == 0) {
+        for (int i = 0; i < 4; i++) {
+          q.projected[i] = {
+              w / 2 - (q.adjusted[i].x * 800) / (q.adjusted[i].y + omega),
+              h / 2 + (q.adjusted[i].z * 800) / (q.adjusted[i].y + omega)};
+        }
+
+      } else {
         for (auto& p : q.partials) {
           for (int i = 0; i < 4; i++) {
             p.projected[i].x =
@@ -513,14 +755,124 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     Clear(olc::BLACK);
 
-    if (!GetKey(olc::Key::TAB).bHeld) {
-      sortedQuads.clear();
-      for (auto& quad : quads) {
-        sortedQuads.push_back(&quad);
-      }
+    sortedQuads.clear();
 
+    float largestZ = 0;
+
+    for (auto& quad : quads) {
+      float fade = 1 - quad.zOrder / 1500;
+      if (fade < 0) continue;
+      if (quad.zOrder > largestZ) largestZ = quad.zOrder;
+      int distance = 255 * std::pow(fade, 2);
+      quad.colour = olc::Pixel(distance, distance, distance);
+      sortedQuads.push_back(&quad);
+    }
+
+    if (GetKey(olc::Key::TAB).bHeld) {
+      if (!GetKey(olc::Key::CTRL).bHeld) {
+        const int size = 8;
+        for (int i = 0; i < mazeWidth * 2 + 1; i++) {
+          for (int j = 0; j < mazeHeight * 2 + 1; j++) {
+            if (map[i][j] == mapCell::wall) {
+              FillRect({i * size, j * size}, {size, size}, olc::WHITE);
+            } else if (map[i][j] == mapCell::room) {
+              FillRect({i * size, j * size}, {size, size}, olc::VERY_DARK_BLUE);
+            } else {
+              FillRect({i * size, j * size}, {size, size}, olc::DARK_BLUE);
+            }
+          }
+        }
+
+        FillRect({mapX * size, mapY * size}, {size, size}, olc::RED);
+        DrawLine({mapX * size + size / 2, mapY * size + size / 2},
+                 {mapX * size + size / 2 +
+                      static_cast<int>(size * 2 * std::sin(angle)),
+                  mapY * size + size / 2 +
+                      static_cast<int>(size * 2 * std::cos(angle))},
+                 olc::RED);
+
+      } else {
+        for (auto q : quads) {
+          if (q.partials.size() > 0) {
+            for (auto p : q.partials) {
+              olc::vf2d pv[4] = {
+                  {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
+                  {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
+                  {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
+                  {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
+
+              DrawPartialWarpedDecal(floorTexture.decal, pv, p.sourcePos,
+                                     p.sourceSize, p.colour);
+
+              DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                       -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                       olc::YELLOW);
+
+              DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                       -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                       olc::YELLOW);
+
+              DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                       -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                       olc::YELLOW);
+
+              DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                       -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                       olc::YELLOW);
+            }
+
+          } else if (q.visible) {
+            if (!q.wall) {
+              olc::vf2d pv[4] = {
+                  {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
+                  {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
+                  {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
+                  {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
+
+              DrawWarpedDecal(floorTexture.decal, pv, q.colour);
+
+            } else {
+              DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                       -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                       olc::GREEN);
+              DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                       -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                       olc::GREEN);
+              DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                       -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                       olc::GREEN);
+              DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                       -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                       olc::GREEN);
+              FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
+                         olc::GREEN);
+            }
+          } else {
+            DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                     -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+            DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                     -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+            DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                     -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+            DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                     -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          }
+        }
+
+        DrawLine(0, h / 2, w, h / 2, olc::BLUE);
+        DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
+
+        FillCircle(w / 2, h / 2, 5, olc::GREEN);
+      }
+    } else {
       std::sort(sortedQuads.begin(), sortedQuads.end(),
                 [](quad* a, quad* b) { return a->zOrder > b->zOrder; });
+
+      int qCount = 0;
 
       for (auto& q : sortedQuads) {
         float dotProduct = q->centre.x * q->normal.x +
@@ -534,93 +886,23 @@ class Olc3d2 : public olc::PixelGameEngine {
           decal = floorTexture.decal;
         }
 
-        if (q->zOrder > -omega && dotProduct > 0) {
+        if (dotProduct > 0) {
           if (q->partials.size() > 0) {
             for (auto& p : q->partials) {
               DrawPartialWarpedDecal(decal, p.projected, p.sourcePos,
                                      p.sourceSize, p.colour);
+              qCount++;
             }
           }
           if (q->visible) {
-            DrawWarpedDecal(decal, q->projected, q->colour);
+            DrawPartialWarpedDecal(decal, q->projected, q->sourcePos,
+                                   q->sourceSize, q->colour);
+            qCount++;
           }
         }
       }
 
-    } else {
-      DrawLine(0, h / 2, w, h / 2, olc::BLUE);
-      DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
-
-      for (auto q : quads) {
-        if (q.partials.size() > 0) {
-          for (auto p : q.partials) {
-            olc::vf2d pv[4] = {
-                {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
-                {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
-                {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
-                {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
-
-            DrawPartialWarpedDecal(floorTexture.decal, pv, p.sourcePos,
-                                   p.sourceSize, p.colour);
-
-            DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                     -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                     olc::YELLOW);
-
-            DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                     -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                     olc::YELLOW);
-
-            DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                     -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                     olc::YELLOW);
-
-            DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                     -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                     olc::YELLOW);
-          }
-
-        } else if (q.visible) {
-          if (!q.wall) {
-            olc::vf2d pv[4] = {
-                {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
-                {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
-                {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
-                {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
-
-            DrawWarpedDecal(floorTexture.decal, pv, q.colour);
-
-          } else {
-            DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                     -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                     olc::GREEN);
-            DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                     -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                     olc::GREEN);
-            DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                     -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                     olc::GREEN);
-            DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                     -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                     olc::GREEN);
-            FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3, olc::GREEN);
-          }
-
-        } else {
-          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        }
-      }
+      DrawStringDecal({10, 10}, std::format("{}", qCount), olc::WHITE);
     }
 
     return true;
