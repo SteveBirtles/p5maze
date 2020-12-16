@@ -3,7 +3,9 @@
 
 const int w = 1280;
 const int h = 1024;
-const float omega = 10;
+const int tileSize = 64;
+const float omega = 0.1;
+float zoom = 800;
 
 struct Renderable {
   Renderable() {}
@@ -22,9 +24,7 @@ struct Renderable {
   olc::Decal* decal = nullptr;
 };
 
-Renderable plasmaTexture;
-Renderable wallTexture;
-Renderable floorTexture;
+Renderable texture[176];
 
 struct vertex {
   float x;
@@ -64,6 +64,7 @@ struct quad {
   olc::vi2d sourceSize;
   bool visible;
   bool wall;
+  bool cropped;
   float zOrder;
   olc::vf2d projected[4];
   std::vector<partial> partials;
@@ -78,8 +79,8 @@ struct quad {
     vertices[3] = _p3;
     sourcePos.x = 0;
     sourcePos.y = 0;
-    sourceSize.x = 512;
-    sourceSize.y = 512;
+    sourceSize.x = tileSize;
+    sourceSize.y = tileSize;
     wall = _wall;
     colour = _colour;
   }
@@ -305,9 +306,12 @@ class Olc3d2 : public olc::PixelGameEngine {
 
  public:
   bool OnUserCreate() override {
-    plasmaTexture.Load("./plasma.png");
-    wallTexture.Load("./wall.png");
-    floorTexture.Load("./floor.png");
+    for (int i = 0; i < 176; i++) {
+      std::ostringstream filename;
+      filename << "tiles/tile" << i << ".png";
+      texture[i].Load(filename.str());
+    }
+
     std::srand(std::time(nullptr));
     randomiseMap();
 
@@ -320,14 +324,35 @@ class Olc3d2 : public olc::PixelGameEngine {
   float myY = unit / 2;
   float myZ = unit / 2;
 
+  int qMax = 0;
+
+  olc::vi2d lastMousePos = {w / 2, h / 2};
+
   bool OnUserUpdate(float fElapsedTime) override {
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
 
-    if (GetKey(olc::Key::PGDN).bHeld) pitch += 0.025;
-    if (GetKey(olc::Key::PGUP).bHeld) pitch -= 0.025;
+    olc::vi2d mousePos = GetMousePos();
 
-    if (GetKey(olc::Key::HOME).bHeld) pitch = 0;
+    if (GetMouse(0).bHeld)
+      angle += static_cast<float>(mousePos.x - lastMousePos.x) / 600;
+
+    lastMousePos = mousePos;
+
+    if (GetKey(olc::Key::PGDN).bHeld && GetKey(olc::Key::CTRL).bHeld)
+      pitch += 0.025;
+    if (GetKey(olc::Key::PGUP).bHeld && GetKey(olc::Key::CTRL).bHeld)
+      pitch -= 0.025;
+
+    if (GetKey(olc::Key::HOME).bHeld) {
+      pitch = 0;
+      zoom = 800;
+    }
+
+    if (GetKey(olc::Key::UP).bHeld) zoom *= 1.05;
+    if (GetKey(olc::Key::DOWN).bHeld) zoom /= 1.05;
+    if (zoom < 400) zoom = 400;
+    if (zoom > 4000) zoom = 4000;
 
     if (GetKey(olc::Key::M).bPressed) randomiseMap();
 
@@ -350,54 +375,60 @@ class Olc3d2 : public olc::PixelGameEngine {
       myX -= std::cos(angle) * 5;
       myY -= -std::sin(angle) * 5;
     }
-
-    int mapX = myX / unit + mazeWidth;
-    int mapY = myY / unit + mazeHeight;
-
-    bool north = false, south = false, east = false, west = false;
-    float dNorth = 0, dSouth = 0, dEast = 0, dWest = 0;
-    double intBit;
-
-    if (mapX > 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
-        mapY < mazeWidth * 2 + 1) {
-      if (map[mapX - 1][mapY] == mapCell::wall) east = true;
-    }
-
-    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 &&
-        mapY < mazeWidth * 2 + 1) {
-      if (map[mapX + 1][mapY] == mapCell::wall) west = true;
-    }
-
-    if (mapX >= 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
-        mapY < mazeWidth * 2 + 1) {
-      if (map[mapX][mapY - 1] == mapCell::wall) north = true;
-    }
-
-    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
-        mapY < mazeWidth * 2) {
-      if (map[mapX][mapY + 1] == mapCell::wall) south = true;
-    }
-
-    if (east) {
-      dEast = std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      if (dEast <= 0.25) myX += (0.25 - dEast) * unit;
-    }
-    if (west) {
-      dWest = 1 - std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      if (dWest <= 0.25) myX -= (0.25 - dWest) * unit;
-    }
-    if (north) {
-      dNorth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
-      if (dNorth <= 0.25) myY += (0.25 - dNorth) * unit;
-    }
-    if (south) {
-      dSouth = 1 - std::modf(myY / unit + mazeHeight - mapY, &intBit);
-      if (dSouth <= 0.25) myY -= (0.25 - dSouth) * unit;
-    }
-
     if (GetKey(olc::Key::R).bHeld) myZ -= 5;
     if (GetKey(olc::Key::F).bHeld) myZ += 5;
     if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
+
+    float cDx[4]{0.25, 0, -0.25, 0};
+    float cDy[4]{0, -0.25, 0, 0.25};
+    double intBit;
+
+    for (int c = 0; c < 4; c++) {
+      bool north = false, south = false, east = false, west = false;
+      float dNorth = 0, dSouth = 0, dEast = 0, dWest = 0;
+
+      int mapX = static_cast<int>(myX / unit + cDx[c]) + mazeWidth;
+      int mapY = static_cast<int>(myY / unit + cDy[c]) + mazeHeight;
+
+      if (cDy[c] == 0) {
+        if (mapX > 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
+            mapY < mazeWidth * 2 + 1) {
+          if (map[mapX - 1][mapY] == mapCell::wall) east = true;
+        }
+        if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 &&
+            mapY < mazeWidth * 2 + 1) {
+          if (map[mapX + 1][mapY] == mapCell::wall) west = true;
+        }
+      }
+
+      if (cDx[c] == 0) {
+        if (mapX >= 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
+            mapY < mazeWidth * 2 + 1) {
+          if (map[mapX][mapY - 1] == mapCell::wall) north = true;
+        }
+        if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
+            mapY < mazeWidth * 2) {
+          if (map[mapX][mapY + 1] == mapCell::wall) south = true;
+        }
+      }
+
+      if (east) {
+        dEast = std::modf(myX / unit + mazeWidth - mapX, &intBit);
+        if (dEast <= 0.25) myX += (0.25 - dEast) * unit;
+      }
+      if (west) {
+        dWest = 1 - std::modf(myX / unit + mazeWidth - mapX, &intBit);
+        if (dWest <= 0.25) myX -= (0.25 - dWest) * unit;
+      }
+      if (north) {
+        dNorth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+        if (dNorth <= 0.25) myY += (0.25 - dNorth) * unit;
+      }
+      if (south) {
+        dSouth = 1 - std::modf(myY / unit + mazeHeight - mapY, &intBit);
+        if (dSouth <= 0.25) myY -= (0.25 - dSouth) * unit;
+      }
+    }
 
     float m1[3][3] = {{1, 0, 0},
                       {0, std::cos(pitch), std::sin(pitch)},
@@ -434,6 +465,7 @@ class Olc3d2 : public olc::PixelGameEngine {
                           (q.vertices[i].z - myZ) * m[2][2];
         if (std::abs(q.adjusted[i].z) > maxZ) maxZ = std::abs(q.adjusted[i].z);
         q.visible = true;
+        q.cropped = false;
 
         q.partials.clear();
       }
@@ -522,32 +554,32 @@ class Olc3d2 : public olc::PixelGameEngine {
             if (n == 0) {
               u = 0;
               v = 0;
-              du = 512 * alpha / d1;
-              dv = 512 * alpha / d2;
+              du = tileSize * alpha / d1;
+              dv = tileSize * alpha / d2;
               order = {0, 1, 2, 3};
             }
 
             if (n == 1) {
               u = 0;
-              v = 512 * (1 - alpha / d2);
-              du = 512 * alpha / d1;
-              dv = 512 * alpha / d2;
+              v = tileSize * (1 - alpha / d2);
+              du = tileSize * alpha / d1;
+              dv = tileSize * alpha / d2;
               order = {3, 0, 1, 2};
             }
 
             if (n == 2) {
-              u = 512 * (1 - alpha / d1);
-              v = 512 * (1 - alpha / d2);
-              du = 512 * alpha / d1;
-              dv = 512 * alpha / d2;
+              u = tileSize * (1 - alpha / d1);
+              v = tileSize * (1 - alpha / d2);
+              du = tileSize * alpha / d1;
+              dv = tileSize * alpha / d2;
               order = {2, 3, 0, 1};
             }
 
             if (n == 3) {
-              u = 512 * (1 - alpha / d1);
+              u = tileSize * (1 - alpha / d1);
               v = 0;
-              du = 512 * alpha / d1;
-              dv = 512 * alpha / d2;
+              du = tileSize * alpha / d1;
+              dv = tileSize * alpha / d2;
               order = {1, 2, 3, 0};
             }
 
@@ -574,33 +606,33 @@ class Olc3d2 : public olc::PixelGameEngine {
 
               if (n == 0) {
                 u = 0;
-                v = 512 * alpha / d1;
-                du = 512 * theta;
-                dv = 512 * (1 - alpha / d1);
+                v = tileSize * alpha / d1;
+                du = tileSize * theta;
+                dv = tileSize * (1 - alpha / d1);
                 order = {0, 1, 2, 3};
               }
 
               if (n == 1) {
-                u = 512 * alpha / d1;
-                v = 512 * (1 - theta);
-                du = 512 * (1 - alpha / d1);
-                dv = 512 * theta;
+                u = tileSize * alpha / d1;
+                v = tileSize * (1 - theta);
+                du = tileSize * (1 - alpha / d1);
+                dv = tileSize * theta;
                 order = {3, 0, 1, 2};
               }
 
               if (n == 2) {
-                u = 512 * (1 - theta);
+                u = tileSize * (1 - theta);
                 v = 0;
-                du = 512 * theta;
-                dv = 512 * (1 - alpha / d1);
+                du = tileSize * theta;
+                dv = tileSize * (1 - alpha / d1);
                 order = {2, 3, 0, 1};
               }
 
               if (n == 3) {
                 u = 0;
                 v = 0;
-                du = 512 * (1 - alpha / d1);
-                dv = 512 * theta;
+                du = tileSize * (1 - alpha / d1);
+                dv = tileSize * theta;
                 order = {1, 2, 3, 0};
               }
 
@@ -629,34 +661,34 @@ class Olc3d2 : public olc::PixelGameEngine {
               std::vector<int> order;
 
               if (n == 0) {
-                u = 512 * alpha / d1;
+                u = tileSize * alpha / d1;
                 v = 0;
-                du = 512 * (1 - alpha / d1);
-                dv = 512 * theta;
+                du = tileSize * (1 - alpha / d1);
+                dv = tileSize * theta;
                 order = {0, 1, 2, 3};
               }
 
               if (n == 1) {
                 u = 0;
                 v = 0;
-                du = 512 * theta;
-                dv = 512 * (1 - alpha / d1);
+                du = tileSize * theta;
+                dv = tileSize * (1 - alpha / d1);
                 order = {3, 0, 1, 2};
               }
 
               if (n == 2) {
                 u = 0;
-                v = 512 * (1 - theta);
-                du = 512 * (1 - alpha / d1);
-                dv = 512 * theta;
+                v = tileSize * (1 - theta);
+                du = tileSize * (1 - alpha / d1);
+                dv = tileSize * theta;
                 order = {2, 3, 0, 1};
               }
 
               if (n == 3) {
-                u = 512 * (1 - theta);
-                v = 512 * alpha / d1;
-                du = 512 * theta;
-                dv = 512 * (1 - alpha / d1);
+                u = tileSize * (1 - theta);
+                v = tileSize * alpha / d1;
+                du = tileSize * theta;
+                dv = tileSize * (1 - alpha / d1);
                 order = {1, 2, 3, 0};
               }
 
@@ -670,23 +702,50 @@ class Olc3d2 : public olc::PixelGameEngine {
         }
       } else {
         q.sourcePos.x = 0;
-        q.sourceSize.x = 512;
+        q.sourceSize.x = tileSize;
+
+        bool cropped[4]{false, false, false, false};
+
+        int cropCount = 0;
 
         for (int i = 0; i < 4; i++) {
           if (q.adjusted[i].y < omega) {
-            int pair = q.vertices[i].pair;
+            cropped[i] = true;
+            cropCount++;
+          }
+        }
 
-            if (q.adjusted[pair].y < omega) {
-              q.visible = false;
-              break;
+        if (cropCount > 2) {
+          q.visible = false;
+          continue;
+        }
+
+        if (cropCount > 0) {
+          int key = -1;
+          float lowestY = omega;
+          for (int i = 0; i < 4; i++) {
+            if (q.adjusted[i].y < lowestY) {
+              lowestY = q.adjusted[i].y;
+              key = i;
             }
+          }
 
-            float x0 = q.adjusted[i].x;
-            float y0 = q.adjusted[i].y;
-            float x1 = q.adjusted[pair].x;
-            float y1 = q.adjusted[pair].y;
+          if (key == -1) {
+            q.visible = false;
+            continue;
+          }
 
-            float delta = (omega - y0) / (y1 - y0);
+          q.cropped = true;
+
+          float keyY = q.adjusted[key].y;
+          float pairY = q.adjusted[q.vertices[key].pair].y;
+
+          float delta = 1 - (omega - pairY) / (keyY - pairY);
+
+          for (int i = 0; i < 4; i++) {
+            if (!cropped[i]) continue;
+
+            int pair = q.vertices[i].pair;
 
             q.adjusted[i].x = q.adjusted[i].x +
                               delta * (q.adjusted[pair].x - q.adjusted[i].x);
@@ -694,12 +753,15 @@ class Olc3d2 : public olc::PixelGameEngine {
             q.adjusted[i].y = q.adjusted[i].y +
                               delta * (q.adjusted[pair].y - q.adjusted[i].y);
 
+            q.adjusted[i].z = q.adjusted[i].z +
+                              delta * (q.adjusted[pair].z - q.adjusted[i].z);
+
             if (i > pair) {
               q.sourcePos.x = 0;
-              q.sourceSize.x = 512 * (1 - delta);
+              q.sourceSize.x = tileSize * (1 - delta);
             } else {
-              q.sourcePos.x = delta * 512;
-              q.sourceSize.x = (1 - delta) * 512;
+              q.sourcePos.x = delta * tileSize;
+              q.sourceSize.x = (1 - delta) * tileSize;
             }
           }
         }
@@ -733,17 +795,17 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (q.partials.size() == 0) {
         for (int i = 0; i < 4; i++) {
           q.projected[i] = {
-              w / 2 - (q.adjusted[i].x * 800) / (q.adjusted[i].y + omega),
-              h / 2 + (q.adjusted[i].z * 800) / (q.adjusted[i].y + omega)};
+              w / 2 - (q.adjusted[i].x * zoom) / (q.adjusted[i].y + omega),
+              h / 2 + (q.adjusted[i].z * zoom) / (q.adjusted[i].y + omega)};
         }
 
       } else {
         for (auto& p : q.partials) {
           for (int i = 0; i < 4; i++) {
             p.projected[i].x =
-                w / 2 - (p.adjusted[i].x * 800) / (p.adjusted[i].y + omega);
+                w / 2 - (p.adjusted[i].x * zoom) / (p.adjusted[i].y + omega);
             p.projected[i].y =
-                h / 2 + (p.adjusted[i].z * 800) / (p.adjusted[i].y + omega);
+                h / 2 + (p.adjusted[i].z * zoom) / (p.adjusted[i].y + omega);
           }
         }
       }
@@ -760,114 +822,117 @@ class Olc3d2 : public olc::PixelGameEngine {
     float largestZ = 0;
 
     for (auto& quad : quads) {
+      if (quad.cropped && pitch != 0) continue;
       float fade = 1 - quad.zOrder / 1500;
       if (fade < 0) continue;
       if (quad.zOrder > largestZ) largestZ = quad.zOrder;
-      int distance = 255 * std::pow(fade, 2);
-      quad.colour = olc::Pixel(distance, distance, distance);
+
+      int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
+      quad.colour = olc::Pixel(rgb, rgb, rgb);
+
       sortedQuads.push_back(&quad);
     }
 
     if (GetKey(olc::Key::TAB).bHeld) {
-      if (!GetKey(olc::Key::CTRL).bHeld) {
-        const int size = 8;
-        for (int i = 0; i < mazeWidth * 2 + 1; i++) {
-          for (int j = 0; j < mazeHeight * 2 + 1; j++) {
-            if (map[i][j] == mapCell::wall) {
-              FillRect({i * size, j * size}, {size, size}, olc::WHITE);
-            } else if (map[i][j] == mapCell::room) {
-              FillRect({i * size, j * size}, {size, size}, olc::VERY_DARK_BLUE);
-            } else {
-              FillRect({i * size, j * size}, {size, size}, olc::DARK_BLUE);
-            }
+      const int size = 8;
+      for (int i = 0; i < mazeWidth * 2 + 1; i++) {
+        for (int j = 0; j < mazeHeight * 2 + 1; j++) {
+          if (map[i][j] == mapCell::wall) {
+            FillRect({i * size, j * size}, {size, size}, olc::WHITE);
+          } else if (map[i][j] == mapCell::room) {
+            FillRect({i * size, j * size}, {size, size}, olc::VERY_DARK_BLUE);
+          } else {
+            FillRect({i * size, j * size}, {size, size}, olc::DARK_BLUE);
           }
         }
+      }
 
-        FillRect({mapX * size, mapY * size}, {size, size}, olc::RED);
-        DrawLine({mapX * size + size / 2, mapY * size + size / 2},
-                 {mapX * size + size / 2 +
-                      static_cast<int>(size * 2 * std::sin(angle)),
-                  mapY * size + size / 2 +
-                      static_cast<int>(size * 2 * std::cos(angle))},
-                 olc::RED);
+      int mapX = myX / unit + mazeWidth;
+      int mapY = myY / unit + mazeHeight;
 
-      } else {
-        for (auto q : quads) {
-          if (q.partials.size() > 0) {
-            for (auto p : q.partials) {
-              olc::vf2d pv[4] = {
-                  {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
-                  {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
-                  {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
-                  {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
+      FillRect({mapX * size, mapY * size}, {size, size}, olc::RED);
+      DrawLine({mapX * size + size / 2, mapY * size + size / 2},
+               {mapX * size + size / 2 +
+                    static_cast<int>(size * 2 * std::sin(angle)),
+                mapY * size + size / 2 +
+                    static_cast<int>(size * 2 * std::cos(angle))},
+               olc::RED);
+    } else if (GetKey(olc::Key::OEM_5).bHeld) {
+      for (auto q : quads) {
+        if (q.partials.size() > 0) {
+          for (auto p : q.partials) {
+            olc::vf2d pv[4] = {
+                {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
+                {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
+                {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
+                {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
 
-              DrawPartialWarpedDecal(floorTexture.decal, pv, p.sourcePos,
-                                     p.sourceSize, p.colour);
+            /*DrawPartialWarpedDecal(floorTexture.decal, pv, p.sourcePos,
+                                   p.sourceSize, p.colour);*/
 
-              DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                       -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                       olc::YELLOW);
+            DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                     -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                     olc::YELLOW);
 
-              DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                       -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                       olc::YELLOW);
+            DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
+                     -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                     olc::YELLOW);
 
-              DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                       -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                       olc::YELLOW);
+            DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
+                     -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                     olc::YELLOW);
 
-              DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                       -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                       olc::YELLOW);
-            }
+            DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
+                     -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
+                     olc::YELLOW);
+          }
 
-          } else if (q.visible) {
-            if (!q.wall) {
-              olc::vf2d pv[4] = {
-                  {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
-                  {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
-                  {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
-                  {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
+        } else if (q.visible) {
+          if (!q.wall) {
+            olc::vf2d pv[4] = {
+                {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
+                {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
+                {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
+                {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
 
-              DrawWarpedDecal(floorTexture.decal, pv, q.colour);
+            // DrawWarpedDecal(floorTexture.decal, pv, q.colour);
 
-            } else {
-              DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                       -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                       olc::GREEN);
-              DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                       -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                       olc::GREEN);
-              DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                       -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                       olc::GREEN);
-              DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                       -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                       olc::GREEN);
-              FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3,
-                         olc::GREEN);
-            }
           } else {
             DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
                      -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+                     olc::GREEN);
             DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
                      -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+                     olc::GREEN);
             DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
                      -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+                     olc::GREEN);
             DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
                      -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                     q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+                     olc::GREEN);
+            FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3, olc::GREEN);
           }
+        } else {
+          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
+                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
+                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
+          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
+                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
+                   q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
         }
-
-        DrawLine(0, h / 2, w, h / 2, olc::BLUE);
-        DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
-
-        FillCircle(w / 2, h / 2, 5, olc::GREEN);
       }
+
+      DrawLine(0, h / 2, w, h / 2, olc::BLUE);
+      DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
+
+      FillCircle(w / 2, h / 2, 5, olc::GREEN);
+
     } else {
       std::sort(sortedQuads.begin(), sortedQuads.end(),
                 [](quad* a, quad* b) { return a->zOrder > b->zOrder; });
@@ -879,11 +944,11 @@ class Olc3d2 : public olc::PixelGameEngine {
                            q->centre.y * q->normal.y +
                            q->centre.z * q->normal.z;
 
-        auto decal = plasmaTexture.decal;
+        auto decal = texture[7].decal;
         if (q->wall) {
-          decal = wallTexture.decal;
+          decal = texture[86].decal;
         } else {
-          decal = floorTexture.decal;
+          decal = texture[109].decal;
         }
 
         if (dotProduct > 0) {
@@ -902,7 +967,13 @@ class Olc3d2 : public olc::PixelGameEngine {
         }
       }
 
-      DrawStringDecal({10, 10}, std::format("{}", qCount), olc::WHITE);
+      if (qCount > qMax) qMax = qCount;
+
+      std::ostringstream stringStream;
+      stringStream << "Quads: " << qCount << " (Max: " << qMax
+                   << ") Zoom: " << static_cast<int>(zoom);
+
+      DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
     }
 
     return true;
