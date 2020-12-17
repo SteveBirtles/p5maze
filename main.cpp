@@ -166,17 +166,18 @@ int clearQuads(int x, int y) {
 int setQuadTexture(int x, int y, int id, bool wall, bool ceiling = false) {
   int setCount = 0;
   for (int i = 0; i < quads.size(); i++) {
-    if (quads[i].mapX == x && quads[i].mapY == y) {      
-      if (quad.wall == wall || !wall && (!ceiling || ceiling && )) {
-        quads.renderable = &texture[id];
-        setCount++;    
+    if (quads[i].mapX == x && quads[i].mapY == y) {
+      if (wall && quads[i].wall ||
+          !wall && !quads[i].wall &&
+              (!ceiling && quads[i].vertices[0].z > 0 ||
+               ceiling && quads[i].vertices[0].z <= 0)) {
+        quads[i].renderable = &texture[id];
+        setCount++;
       }
-      
     }
   }
   return setCount;
 }
-
 
 void regenerateQuads() {
   quads.clear();
@@ -528,7 +529,10 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
         cursorY <= mazeHeight * 2) {
-      if (GetKey(olc::Key::SPACE).bHeld) map[cursorX][cursorY].floor = 116;
+      if (GetKey(olc::Key::SPACE).bHeld) {
+        setQuadTexture(cursorX, cursorY, 116, false);
+      }
+
       if (GetKey(olc::Key::K1).bHeld)
         if (map[cursorX][cursorY].type != cellType::wall) {
           map[cursorX][cursorY].type = cellType::wall;
@@ -616,45 +620,30 @@ class Olc3d2 : public olc::PixelGameEngine {
     int mapY = myY / unit + mazeHeight;
 
     bool north = false, south = false, east = false, west = false;
-    float dNorth = 0, dSouth = 0, dEast = 0, dWest = 0;
+    bool northEast = false, southEast = false, northWest = false,
+         southWest = false;
+
     double intBit;
+    float eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
+    float northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
 
-    if (mapX > 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
+    if (mapX > 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
         mapY < mazeWidth * 2 + 1) {
-      if (map[mapX - 1][mapY].type == cellType::wall) east = true;
+      east = map[mapX - 1][mapY].type == cellType::wall;
+      west = map[mapX + 1][mapY].type == cellType::wall;
+      north = map[mapX][mapY - 1].type == cellType::wall;
+      south = map[mapX][mapY + 1].type == cellType::wall;
+
+      northEast = map[mapX - 1][mapY - 1].type == cellType::wall;
+      southEast = map[mapX - 1][mapY + 1].type == cellType::wall;
+      northWest = map[mapX + 1][mapY - 1].type == cellType::wall;
+      southWest = map[mapX + 1][mapY + 1].type == cellType::wall;
     }
 
-    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 &&
-        mapY < mazeWidth * 2 + 1) {
-      if (map[mapX + 1][mapY].type == cellType::wall) west = true;
-    }
-
-    if (mapX >= 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
-        mapY < mazeWidth * 2 + 1) {
-      if (map[mapX][mapY - 1].type == cellType::wall) north = true;
-    }
-
-    if (mapX >= 0 && mapY >= 0 && mapX < mazeWidth * 2 + 1 &&
-        mapY < mazeWidth * 2) {
-      if (map[mapX][mapY + 1].type == cellType::wall) south = true;
-    }
-
-    if (east) {
-      dEast = std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      if (dEast <= 0.25) myX += (0.25 - dEast) * unit;
-    }
-    if (west) {
-      dWest = 1 - std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      if (dWest <= 0.25) myX -= (0.25 - dWest) * unit;
-    }
-    if (north) {
-      dNorth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
-      if (dNorth <= 0.25) myY += (0.25 - dNorth) * unit;
-    }
-    if (south) {
-      dSouth = 1 - std::modf(myY / unit + mazeHeight - mapY, &intBit);
-      if (dSouth <= 0.25) myY -= (0.25 - dSouth) * unit;
-    }
+    std::cout << mapX << ", " << mapY << " | " << eastWest << ", " << northSouth
+              << " | N" << north << " S" << south << " E" << east << " W"
+              << west << " | NE" << northEast << " SE" << southEast << " NW"
+              << northWest << " SW" << southWest << std::endl;
 
     float m1[3][3] = {{1, 0, 0},
                       {0, std::cos(pitch), std::sin(pitch)},
