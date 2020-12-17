@@ -7,7 +7,10 @@ const int tileSize = 64;
 const float omega = 0.1;
 float drawDistance = 1500;
 float zoom = w / 2;
-float cursorRange = 2.5;
+
+const int defaultFloor = 97;
+const int defaultWall = 154;
+const int defaultCeiling = 102;
 
 struct Renderable {
   Renderable() {}
@@ -102,7 +105,7 @@ std::vector<quad> quads;
 std::vector<quad*> sortedQuads;
 quad cursor;
 
-enum class cellType { wall, corridor, lowroom, highroom, empty };
+enum class cellType { empty, wall, corridor, lowroom, highroom, sky };
 
 struct mapCell {
   cellType type;
@@ -137,14 +140,14 @@ void clearMap() {
       if (i == -mazeWidth || j == -mazeWidth || i == mazeWidth ||
           j == mazeWidth) {
         map[i + mazeWidth][j + mazeHeight].type = cellType::wall;
-        map[i + mazeWidth][j + mazeHeight].wall = 60;
-        map[i + mazeWidth][j + mazeHeight].floor = 60;
-        map[i + mazeWidth][j + mazeHeight].ceiling = 60;
+        map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+        map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
+        map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
       } else {
-        map[i + mazeWidth][j + mazeHeight].type = cellType::highroom;
-        map[i + mazeWidth][j + mazeHeight].wall = 60;
-        map[i + mazeWidth][j + mazeHeight].floor = 60;
-        map[i + mazeWidth][j + mazeHeight].ceiling = 60;
+        map[i + mazeWidth][j + mazeHeight].type = cellType::sky;
+        map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+        map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
+        map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
       }
     }
   }
@@ -195,7 +198,8 @@ void regenerateQuads() {
 
       if (map[i + mazeWidth][j + mazeHeight].type == cellType::corridor ||
           map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom ||
-          map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) {
+          map[i + mazeWidth][j + mazeHeight].type == cellType::highroom ||
+          map[i + mazeWidth][j + mazeHeight].type == cellType::sky) {
         quads.push_back(quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
                              vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1),
                              false, i + mazeWidth, j + mazeHeight,
@@ -259,22 +263,33 @@ void regenerateQuads() {
       }
 
       for (int k = -1; k <= 0; k++) {
-        if (j > -mazeHeight &&
-            (map[i + mazeWidth][j + mazeHeight - 1].type == cellType::lowroom &&
-                 k == 0 ||
-             map[i + mazeWidth][j + mazeHeight - 1].type ==
-                 cellType::highroom) &&
-            map[i + mazeWidth][j + mazeHeight - 1].type !=
-                map[i + mazeWidth][j + mazeHeight].type &&
-            !((map[i + mazeWidth][j + mazeHeight - 1].type ==
-                   cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight - 1].type ==
-                   cellType::highroom) &&
-              (map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) &&
-              k == 0)
+        if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
+            (j > -mazeHeight &&
+                 (map[i + mazeWidth][j + mazeHeight - 1].type ==
+                          cellType::lowroom &&
+                      k == 0 ||
+                  map[i + mazeWidth][j + mazeHeight - 1].type ==
+                      cellType::highroom) &&
+                 map[i + mazeWidth][j + mazeHeight - 1].type !=
+                     map[i + mazeWidth][j + mazeHeight].type &&
+                 !((map[i + mazeWidth][j + mazeHeight - 1].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight - 1].type ==
+                        cellType::highroom ||
+                    map[i + mazeWidth][j + mazeHeight - 1].type ==
+                        cellType::sky) &&
+                   (map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::highroom) &&
+                   k == 0) ||
+             map[i + mazeWidth][j + mazeHeight - 1].type == cellType::sky &&
+                 map[i + mazeWidth][j + mazeHeight].type !=
+                     cellType::highroom &&
+                 !(k == 0 &&
+                   map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom)
 
-        ) {
+                 )) {
           quads.push_back(quad(
               vertex(x2, y2, k * unit, 3), vertex(x2, y2, k * unit - unit, 2),
               vertex(x1, y1, k * unit - unit, 1), vertex(x1, y1, k * unit, 0),
@@ -282,22 +297,33 @@ void regenerateQuads() {
               map[i + mazeWidth][j + mazeHeight].wall));
         }
 
-        if (i < mazeWidth - 1 &&
-            (map[i + mazeWidth + 1][j + mazeHeight].type == cellType::lowroom &&
-                 k == 0 ||
-             map[i + mazeWidth + 1][j + mazeHeight].type ==
-                 cellType::highroom) &&
-            map[i + mazeWidth + 1][j + mazeHeight].type !=
-                map[i + mazeWidth][j + mazeHeight].type &&
-            !((map[i + mazeWidth + 1][j + mazeHeight].type ==
-                   cellType::lowroom ||
-               map[i + mazeWidth + 1][j + mazeHeight].type ==
-                   cellType::highroom) &&
-              (map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) &&
-              k == 0)
+        if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
+            (i < mazeWidth - 1 &&
+                 (map[i + mazeWidth + 1][j + mazeHeight].type ==
+                          cellType::lowroom &&
+                      k == 0 ||
+                  map[i + mazeWidth + 1][j + mazeHeight].type ==
+                      cellType::highroom) &&
+                 map[i + mazeWidth + 1][j + mazeHeight].type !=
+                     map[i + mazeWidth][j + mazeHeight].type &&
+                 !((map[i + mazeWidth + 1][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth + 1][j + mazeHeight].type ==
+                        cellType::highroom ||
+                    map[i + mazeWidth + 1][j + mazeHeight].type ==
+                        cellType::sky) &&
+                   (map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::highroom) &&
+                   k == 0) ||
+             map[i + mazeWidth + 1][j + mazeHeight].type == cellType::sky &&
+                 map[i + mazeWidth][j + mazeHeight].type !=
+                     cellType::highroom &&
+                 !(k == 0 &&
+                   map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom)
 
-        ) {
+                 )) {
           quads.push_back(quad(
               vertex(x3, y3, k * unit, 3), vertex(x3, y3, k * unit - unit, 2),
               vertex(x2, y2, k * unit - unit, 1), vertex(x2, y2, k * unit, 0),
@@ -305,22 +331,33 @@ void regenerateQuads() {
               map[i + mazeWidth][j + mazeHeight].wall));
         }
 
-        if (j < mazeHeight - 1 &&
-            (map[i + mazeWidth][j + mazeHeight + 1].type == cellType::lowroom &&
-                 k == 0 ||
-             map[i + mazeWidth][j + mazeHeight + 1].type ==
-                 cellType::highroom) &&
-            map[i + mazeWidth][j + mazeHeight + 1].type !=
-                map[i + mazeWidth][j + mazeHeight].type &&
-            !((map[i + mazeWidth][j + mazeHeight + 1].type ==
-                   cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight + 1].type ==
-                   cellType::highroom) &&
-              (map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) &&
-              k == 0)
+        if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
+            (j < mazeHeight - 1 &&
+                 (map[i + mazeWidth][j + mazeHeight + 1].type ==
+                          cellType::lowroom &&
+                      k == 0 ||
+                  map[i + mazeWidth][j + mazeHeight + 1].type ==
+                      cellType::highroom) &&
+                 map[i + mazeWidth][j + mazeHeight + 1].type !=
+                     map[i + mazeWidth][j + mazeHeight].type &&
+                 !((map[i + mazeWidth][j + mazeHeight + 1].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight + 1].type ==
+                        cellType::highroom ||
+                    map[i + mazeWidth][j + mazeHeight + 1].type ==
+                        cellType::sky) &&
+                   (map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::highroom) &&
+                   k == 0) ||
+             map[i + mazeWidth][j + mazeHeight + 1].type == cellType::sky &&
+                 map[i + mazeWidth][j + mazeHeight].type !=
+                     cellType::highroom &&
+                 !(k == 0 &&
+                   map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom)
 
-        ) {
+                 )) {
           quads.push_back(quad(
               vertex(x4, y4, k * unit, 3), vertex(x4, y4, k * unit - unit, 2),
               vertex(x3, y3, k * unit - unit, 1), vertex(x3, y3, k * unit, 0),
@@ -328,22 +365,33 @@ void regenerateQuads() {
               map[i + mazeWidth][j + mazeHeight].wall));
         }
 
-        if (i > -mazeHeight &&
-            (map[i + mazeWidth - 1][j + mazeHeight].type == cellType::lowroom &&
-                 k == 0 ||
-             map[i + mazeWidth - 1][j + mazeHeight].type ==
-                 cellType::highroom) &&
-            map[i + mazeWidth - 1][j + mazeHeight].type !=
-                map[i + mazeWidth][j + mazeHeight].type &&
-            !((map[i + mazeWidth - 1][j + mazeHeight].type ==
-                   cellType::lowroom ||
-               map[i + mazeWidth - 1][j + mazeHeight].type ==
-                   cellType::highroom) &&
-              (map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom ||
-               map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) &&
-              k == 0)
+        if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
+            (i > -mazeHeight &&
+                 (map[i + mazeWidth - 1][j + mazeHeight].type ==
+                          cellType::lowroom &&
+                      k == 0 ||
+                  map[i + mazeWidth - 1][j + mazeHeight].type ==
+                      cellType::highroom) &&
+                 map[i + mazeWidth - 1][j + mazeHeight].type !=
+                     map[i + mazeWidth][j + mazeHeight].type &&
+                 !((map[i + mazeWidth - 1][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth - 1][j + mazeHeight].type ==
+                        cellType::highroom ||
+                    map[i + mazeWidth - 1][j + mazeHeight].type ==
+                        cellType::sky) &&
+                   (map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::lowroom ||
+                    map[i + mazeWidth][j + mazeHeight].type ==
+                        cellType::highroom) &&
+                   k == 0) ||
+             map[i + mazeWidth - 1][j + mazeHeight].type == cellType::sky &&
+                 map[i + mazeWidth][j + mazeHeight].type !=
+                     cellType::highroom &&
+                 !(k == 0 &&
+                   map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom)
 
-        ) {
+                 )) {
           quads.push_back(quad(
               vertex(x1, y1, k * unit, 3), vertex(x1, y1, k * unit - unit, 2),
               vertex(x4, y4, k * unit - unit, 1), vertex(x4, y4, k * unit, 0),
@@ -427,9 +475,9 @@ void randomiseMap() {
           (i + mazeWidth) % 2 == 1 && (j + mazeHeight) % 2 == 1
               ? cellType::corridor
               : cellType::wall;
-      map[i + mazeWidth][j + mazeHeight].floor = 1;
-      map[i + mazeWidth][j + mazeHeight].wall = 4;
-      map[i + mazeWidth][j + mazeHeight].ceiling = 7;
+      map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
+      map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+      map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
     }
   }
 
@@ -437,15 +485,15 @@ void randomiseMap() {
     for (int j = 0; j < mazeHeight; j++) {
       if (maze[i][j].right) {
         map[i * 2 + 2][j * 2 + 1].type = cellType::corridor;
-        map[i * 2 + 2][j * 2 + 1].floor = 1;
-        map[i * 2 + 2][j * 2 + 1].wall = 4;
-        map[i * 2 + 2][j * 2 + 1].ceiling = 7;
+        map[i * 2 + 2][j * 2 + 1].floor = defaultFloor;
+        map[i * 2 + 2][j * 2 + 1].wall = defaultWall;
+        map[i * 2 + 2][j * 2 + 1].ceiling = defaultCeiling;
       }
       if (maze[i][j].down) {
         map[i * 2 + 1][j * 2 + 2].type = cellType::corridor;
-        map[i * 2 + 1][j * 2 + 2].floor = 1;
-        map[i * 2 + 1][j * 2 + 2].wall = 4;
-        map[i * 2 + 1][j * 2 + 2].ceiling = 7;
+        map[i * 2 + 1][j * 2 + 2].floor = defaultFloor;
+        map[i * 2 + 1][j * 2 + 2].wall = defaultWall;
+        map[i * 2 + 1][j * 2 + 2].ceiling = defaultCeiling;
       }
     }
   }
@@ -458,9 +506,9 @@ void randomiseMap() {
     for (int i = x; i <= x + rw; i++) {
       for (int j = y; j <= y + rh; j++) {
         map[i][j].type = cellType::lowroom;
-        map[i][j].floor = 1;
-        map[i][j].wall = 4;
-        map[i][j].ceiling = 7;
+        map[i][j].floor = defaultFloor;
+        map[i][j].wall = defaultWall;
+        map[i][j].ceiling = defaultCeiling;
       }
     }
   }
@@ -473,9 +521,9 @@ void randomiseMap() {
     for (int i = x; i <= x + rw; i++) {
       for (int j = y; j <= y + rh; j++) {
         map[i][j].type = cellType::highroom;
-        map[i][j].floor = 1;
-        map[i][j].wall = 4;
-        map[i][j].ceiling = 7;
+        map[i][j].floor = defaultFloor;
+        map[i][j].wall = defaultWall;
+        map[i][j].ceiling = defaultCeiling;
       }
     }
   }
@@ -505,55 +553,88 @@ class Olc3d2 : public olc::PixelGameEngine {
   float myX = unit / 2;
   float myY = unit / 2;
   float myZ = unit / 2;
+  float lastMyX, lastMyY;
+
+  int selectedTexture = 1;
 
   int qMax = 0;
 
-  olc::vi2d lastMousePos = {w / 2, h / 2};
+  // olc::vi2d lastMousePos = {w / 2, h / 2};
 
   bool OnUserUpdate(float fElapsedTime) override {
+    if (GetKey(olc::Key::UP).bPressed)
+      selectedTexture = (selectedTexture + 1) % 176;
+    if (GetKey(olc::Key::DOWN).bPressed)
+      selectedTexture = (selectedTexture + 175) % 176;
+
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
 
+    float m1[3][3] = {{1, 0, 0},
+                      {0, std::cos(pitch), std::sin(pitch)},
+                      {0, -std::sin(pitch), std::cos(pitch)}};
+
+    float m2[3][3] = {{std::cos(angle), -std::sin(angle), 0},
+                      {std::sin(angle), std::cos(angle), 0},
+                      {0, 0, 1}};
+
+    float m[3][3];
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        m[i][j] =
+            m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j] + m1[i][2] * m2[2][j];
+      }
+    }
+
     olc::vi2d mousePos = GetMousePos();
 
-    if (GetMouse(0).bHeld)
-      angle += static_cast<float>(mousePos.x - lastMousePos.x) / 600;
+    float cursorAngle = (static_cast<float>(mousePos.x) - w / 2) / 700;
 
-    lastMousePos = mousePos;
+    float cursorRange = mazeWidth;
+    if (mousePos.y > h / 2) {
+      cursorRange =
+          8 * std::pow(1 - static_cast<float>(mousePos.y - h / 2) / (h / 2), 2);
+    }
 
-    int cursorX = std::round(myX / unit + mazeWidth);
-    int cursorY = std::round(myY / unit + mazeHeight);
-
-    cursorX += cursorRange * std::sin(angle);
-    cursorY += cursorRange * std::cos(angle);
+    int cursorX = static_cast<int>(myX / unit + mazeWidth +
+                                   cursorRange * std::sin(angle - cursorAngle));
+    int cursorY = static_cast<int>(myY / unit + mazeHeight +
+                                   cursorRange * std::cos(angle - cursorAngle));
 
     if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
         cursorY <= mazeHeight * 2) {
-      if (GetKey(olc::Key::SPACE).bHeld) {
-        setQuadTexture(cursorX, cursorY, 116, false);
-      }
-
-      if (GetKey(olc::Key::K1).bHeld)
+      if (GetKey(olc::Key::SPACE).bHeld || GetMouse(0).bHeld) {
+        setQuadTexture(cursorX, cursorY, selectedTexture, false);
+      } else if (GetKey(olc::Key::ENTER).bHeld || GetMouse(1).bHeld) {
+        setQuadTexture(cursorX, cursorY, selectedTexture, true);
+      } else if (GetKey(olc::Key::BACK).bHeld) {
+        setQuadTexture(cursorX, cursorY, selectedTexture, true, true);
+      } else if (GetKey(olc::Key::K1).bHeld) {
         if (map[cursorX][cursorY].type != cellType::wall) {
           map[cursorX][cursorY].type = cellType::wall;
           regenerateQuads();
         }
-      if (GetKey(olc::Key::K2).bHeld)
+      } else if (GetKey(olc::Key::K2).bHeld) {
         if (map[cursorX][cursorY].type != cellType::corridor) {
           map[cursorX][cursorY].type = cellType::corridor;
           regenerateQuads();
         }
-      if (GetKey(olc::Key::K3).bHeld)
+      } else if (GetKey(olc::Key::K3).bHeld) {
         if (map[cursorX][cursorY].type != cellType::lowroom) {
           map[cursorX][cursorY].type = cellType::lowroom;
           regenerateQuads();
         }
-      if (GetKey(olc::Key::K4).bHeld)
+      } else if (GetKey(olc::Key::K4).bHeld) {
         if (map[cursorX][cursorY].type != cellType::highroom) {
           map[cursorX][cursorY].type = cellType::highroom;
           regenerateQuads();
         }
-      if (GetKey(olc::Key::DEL).bHeld) {
+      } else if (GetKey(olc::Key::K5).bHeld) {
+        if (map[cursorX][cursorY].type != cellType::sky) {
+          map[cursorX][cursorY].type = cellType::sky;
+          regenerateQuads();
+        }
+      } else if (GetKey(olc::Key::DEL).bHeld) {
         map[cursorX][cursorY].type = cellType::empty;
         clearQuads(cursorX, cursorY);
       }
@@ -578,11 +659,6 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (zoom < w / 4) zoom = w / 4;
     if (zoom > w * 5) zoom = w * 5;
 
-    if (GetKey(olc::Key::UP).bHeld) cursorRange *= 1.05;
-    if (GetKey(olc::Key::DOWN).bHeld) cursorRange /= 1.05;
-    if (cursorRange < 2) cursorRange = 2;
-    if (cursorRange > 10) cursorRange = 10;
-
     if (GetKey(olc::Key::M).bPressed) {
       randomiseMap();
       regenerateQuads();
@@ -595,6 +671,9 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (pitch < -1.571) pitch = -1.571;
     if (pitch > 1.571) pitch = 1.571;
+
+    lastMyX = myX;
+    lastMyY = myY;
 
     if (GetKey(olc::Key::W).bHeld) {
       myX += std::sin(angle) * 5;
@@ -619,16 +698,19 @@ class Olc3d2 : public olc::PixelGameEngine {
     int mapX = myX / unit + mazeWidth;
     int mapY = myY / unit + mazeHeight;
 
-    bool north = false, south = false, east = false, west = false;
-    bool northEast = false, southEast = false, northWest = false,
-         southWest = false;
-
-    double intBit;
-    float eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
-    float northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+    float dx = myX - lastMyX;
+    float dy = myY - lastMyY;
 
     if (mapX > 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
         mapY < mazeWidth * 2 + 1) {
+      bool north = false, south = false, east = false, west = false;
+      bool northEast = false, southEast = false, northWest = false,
+           southWest = false;
+
+      double intBit;
+      float eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
+      float northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+
       east = map[mapX - 1][mapY].type == cellType::wall;
       west = map[mapX + 1][mapY].type == cellType::wall;
       north = map[mapX][mapY - 1].type == cellType::wall;
@@ -638,27 +720,70 @@ class Olc3d2 : public olc::PixelGameEngine {
       southEast = map[mapX - 1][mapY + 1].type == cellType::wall;
       northWest = map[mapX + 1][mapY - 1].type == cellType::wall;
       southWest = map[mapX + 1][mapY + 1].type == cellType::wall;
-    }
 
-    std::cout << mapX << ", " << mapY << " | " << eastWest << ", " << northSouth
-              << " | N" << north << " S" << south << " E" << east << " W"
-              << west << " | NE" << northEast << " SE" << southEast << " NW"
-              << northWest << " SW" << southWest << std::endl;
-
-    float m1[3][3] = {{1, 0, 0},
-                      {0, std::cos(pitch), std::sin(pitch)},
-                      {0, -std::sin(pitch), std::cos(pitch)}};
-
-    float m2[3][3] = {{std::cos(angle), -std::sin(angle), 0},
-                      {std::sin(angle), std::cos(angle), 0},
-                      {0, 0, 1}};
-
-    float m[3][3];
-    for (int i = 0; i < 3; i++) {
-      for (int j = 0; j < 3; j++) {
-        m[i][j] =
-            m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j] + m1[i][2] * m2[2][j];
+      if (!north && !east && northSouth < 0.25 && eastWest < 0.25 &&
+          northEast) {
+        if (dx < 0 && dy < 0) {
+          if (-dx > -dy)
+            myX = (mapX + 0.25 - mazeWidth) * unit;
+          else
+            myY = (mapY + 0.25 - mazeHeight) * unit;
+        } else {
+          if (dx < 0) myX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy < 0) myY = (mapY + 0.25 - mazeHeight) * unit;
+        }
       }
+
+      if (!north && !west && northSouth < 0.25 && eastWest > 0.75 &&
+          northWest) {
+        if (dx > 0 && dy < 0) {
+          if (dx > -dy)
+            myX = (mapX + 0.75 - mazeWidth) * unit;
+          else
+            myY = (mapY + 0.25 - mazeHeight) * unit;
+        } else {
+          if (dx > 0) myX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy < 0) myY = (mapY + 0.25 - mazeHeight) * unit;
+        }
+      }
+
+      if (!south && !east && northSouth > 0.75 && eastWest < 0.25 &&
+          southEast) {
+        if (dx < 0 && dy > 0) {
+          if (-dx < dy)
+            myX = (mapX + 0.25 - mazeWidth) * unit;
+          else
+            myY = (mapY + 0.75 - mazeHeight) * unit;
+        } else {
+          if (dx < 0) myX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy > 0) myY = (mapY + 0.75 - mazeHeight) * unit;
+        }
+      }
+
+      if (!south && !west && northSouth > 0.75 && eastWest > 0.75 &&
+          southWest) {
+        if (dx > 0 && dy > 0) {
+          if (dx > dy)
+            myX = (mapX + 0.75 - mazeWidth) * unit;
+          else
+            myY = (mapY + 0.75 - mazeHeight) * unit;
+        } else {
+          if (dx > 0) myX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy > 0) myY = (mapY + 0.75 - mazeHeight) * unit;
+        }
+      }
+
+      eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
+      northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+
+      if (northSouth < 0.25 && north && dy < 0)
+        myY = (mapY + 0.25 - mazeHeight) * unit;
+      if (northSouth > 0.75 && south && dy > 0)
+        myY = (mapY + 0.75 - mazeHeight) * unit;
+      if (eastWest < 0.25 && east && dx < 0)
+        myX = (mapX + 0.25 - mazeWidth) * unit;
+      if (eastWest > 0.75 && west && dx > 0)
+        myX = (mapX + 0.75 - mazeWidth) * unit;
     }
 
     float x1 = unit * (cursorX - mazeWidth);
@@ -1224,12 +1349,14 @@ class Olc3d2 : public olc::PixelGameEngine {
 
       std::ostringstream stringStream;
       stringStream << "Quads: " << qCount << " (Max: " << qMax
-                   << ") Zoom: " << static_cast<int>(200 * zoom / w) << "%";
+                   << ") Zoom: " << static_cast<int>(200 * zoom / w)
+                   << "%  Mouse: " << mousePos.x - w / 2 << ", "
+                   << mousePos.y - h / 2;
 
       DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
 
       if (cursor.visible) {
-        DrawWarpedDecal(cursor.renderable->decal, cursor.projected);
+        DrawWarpedDecal(texture[selectedTexture].decal, cursor.projected);
       }
     }
 
