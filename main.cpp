@@ -73,6 +73,10 @@ struct quad {
   bool cropped;
   double dSquared;
   olc::vf2d projected[4];
+  float minProjectedX;
+  float minProjectedY;
+  float maxProjectedX;
+  float maxProjectedY;
   std::vector<partial> partials;
   vertex normal;
   vertex centre;
@@ -103,7 +107,6 @@ struct quad {
 
 std::vector<quad> quads;
 std::vector<quad*> sortedQuads;
-quad cursor;
 
 enum class cellType { empty, wall, corridor, lowroom, highroom, sky };
 
@@ -172,8 +175,8 @@ int setQuadTexture(int x, int y, int id, bool wall, bool ceiling = false) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
       if (wall && quads[i].wall ||
           !wall && !quads[i].wall &&
-              (!ceiling && quads[i].vertices[0].z > 0 ||
-               ceiling && quads[i].vertices[0].z <= 0)) {
+              (!ceiling && quads[i].vertices[0].z > unit / 2 ||
+               ceiling && quads[i].vertices[0].z < unit / 2)) {
         quads[i].renderable = &texture[id];
         setCount++;
       }
@@ -556,6 +559,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   float lastMyX, lastMyY;
   olc::vi2d mousePos;
   int cursorX, cursorY;
+  quad* cursorQuad;
   int selectedTexture = 1;
 
   int qMax = 0;
@@ -580,8 +584,6 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   void handleInputs() {
-    mousePos = GetMousePos();
-
     if (GetKey(olc::Key::UP).bPressed)
       selectedTexture = (selectedTexture + 1) % 176;
     if (GetKey(olc::Key::DOWN).bPressed)
@@ -590,55 +592,41 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
 
-    float cursorAngle = (static_cast<float>(mousePos.x) - w / 2) / 700;
-
-    float cursorRange = mazeWidth;
-    if (mousePos.y > h / 2) {
-      cursorRange =
-          8 * std::pow(1 - static_cast<float>(mousePos.y - h / 2) / (h / 2), 2);
-    }
-
-    cursorX = static_cast<int>(myX / unit + mazeWidth +
-                               cursorRange * std::sin(angle - cursorAngle));
-    cursorY = static_cast<int>(myY / unit + mazeHeight +
-                               cursorRange * std::cos(angle - cursorAngle));
-
     if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
         cursorY <= mazeHeight * 2) {
-      if (GetKey(olc::Key::SPACE).bHeld || GetMouse(0).bHeld) {
+      if (GetMouse(0).bHeld && cursorQuad != nullptr) {
+        cursorQuad->renderable = &texture[selectedTexture];
+      } else if (GetKey(olc::Key::B).bHeld) {
         setQuadTexture(cursorX, cursorY, selectedTexture, false);
-      } else if (GetKey(olc::Key::ENTER).bHeld || GetMouse(1).bHeld) {
+      } else if (GetKey(olc::Key::G).bHeld) {
         setQuadTexture(cursorX, cursorY, selectedTexture, true);
-      } else if (GetKey(olc::Key::BACK).bHeld) {
-        setQuadTexture(cursorX, cursorY, selectedTexture, true, true);
-      } else if (GetKey(olc::Key::K1).bHeld) {
+      } else if (GetKey(olc::Key::T).bHeld) {
+        setQuadTexture(cursorX, cursorY, selectedTexture, false, true);
+      } else if (GetKey(olc::Key::K1).bPressed) {
         if (map[cursorX][cursorY].type != cellType::wall) {
           map[cursorX][cursorY].type = cellType::wall;
           regenerateQuads();
         }
-      } else if (GetKey(olc::Key::K2).bHeld) {
+      } else if (GetKey(olc::Key::K2).bPressed) {
         if (map[cursorX][cursorY].type != cellType::corridor) {
           map[cursorX][cursorY].type = cellType::corridor;
           regenerateQuads();
         }
-      } else if (GetKey(olc::Key::K3).bHeld) {
+      } else if (GetKey(olc::Key::K3).bPressed) {
         if (map[cursorX][cursorY].type != cellType::lowroom) {
           map[cursorX][cursorY].type = cellType::lowroom;
           regenerateQuads();
         }
-      } else if (GetKey(olc::Key::K4).bHeld) {
+      } else if (GetKey(olc::Key::K4).bPressed) {
         if (map[cursorX][cursorY].type != cellType::highroom) {
           map[cursorX][cursorY].type = cellType::highroom;
           regenerateQuads();
         }
-      } else if (GetKey(olc::Key::K5).bHeld) {
+      } else if (GetKey(olc::Key::K5).bPressed) {
         if (map[cursorX][cursorY].type != cellType::sky) {
           map[cursorX][cursorY].type = cellType::sky;
           regenerateQuads();
         }
-      } else if (GetKey(olc::Key::DEL).bHeld) {
-        map[cursorX][cursorY].type = cellType::empty;
-        clearQuads(cursorX, cursorY);
       }
     }
 
@@ -788,53 +776,6 @@ class Olc3d2 : public olc::PixelGameEngine {
         myX = (mapX + 0.25 - mazeWidth) * unit;
       if (eastWest > 0.75 && west && dx > 0)
         myX = (mapX + 0.75 - mazeWidth) * unit;
-    }
-  }
-
-  void updateCursor() {
-    float x1 = unit * (cursorX - mazeWidth);
-    float y1 = unit * (cursorY - mazeHeight);
-    float x2 = x1 + unit;
-    float y2 = y1;
-    float x4 = x1;
-    float y4 = y1 + unit;
-    float x3 = x1 + (x2 - x1) + (x4 - x1);
-    float y3 = y1 + (y2 - y1) + (y4 - y1);
-
-    cursor = quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
-                  vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1), -1, -1,
-                  false, 124);
-
-    for (int i = 0; i < 4; i++) {
-      cursor.adjusted[i].x = (cursor.vertices[i].x - myX) * m[0][0] +
-                             (cursor.vertices[i].y - myY) * m[0][1] +
-                             (cursor.vertices[i].z - myZ) * m[0][2];
-
-      cursor.adjusted[i].y = (cursor.vertices[i].x - myX) * m[1][0] +
-                             (cursor.vertices[i].y - myY) * m[1][1] +
-                             (cursor.vertices[i].z - myZ) * m[1][2];
-
-      cursor.adjusted[i].z = (cursor.vertices[i].x - myX) * m[2][0] +
-                             (cursor.vertices[i].y - myY) * m[2][1] +
-                             (cursor.vertices[i].z - myZ) * m[2][2];
-    }
-
-    int cropCount = 0;
-
-    for (int i = 0; i < 4; i++) {
-      if (cursor.adjusted[i].y < omega) cropCount++;
-    }
-
-    if (cropCount > 0) {
-      cursor.visible = false;
-    } else {
-      cursor.visible = true;
-      for (int i = 0; i < 4; i++) {
-        cursor.projected[i] = {w / 2 - (cursor.adjusted[i].x * zoom) /
-                                           (cursor.adjusted[i].y + omega),
-                               h / 2 + (cursor.adjusted[i].z * zoom) /
-                                           (cursor.adjusted[i].y + omega)};
-      }
     }
   }
 
@@ -1186,10 +1127,22 @@ class Olc3d2 : public olc::PixelGameEngine {
                    std::pow(q.centre.z, 2);
 
       if (q.partials.size() == 0) {
+        q.minProjectedX = w;
+        q.minProjectedY = h;
+        q.maxProjectedX = 0;
+        q.maxProjectedY = 0;
         for (int i = 0; i < 4; i++) {
           q.projected[i] = {
               w / 2 - (q.adjusted[i].x * zoom) / (q.adjusted[i].y + omega),
               h / 2 + (q.adjusted[i].z * zoom) / (q.adjusted[i].y + omega)};
+          if (q.projected[i].x < q.minProjectedX)
+            q.minProjectedX = q.projected[i].x;
+          if (q.projected[i].y < q.minProjectedY)
+            q.minProjectedY = q.projected[i].y;
+          if (q.projected[i].x > q.maxProjectedX)
+            q.maxProjectedX = q.projected[i].x;
+          if (q.projected[i].y > q.maxProjectedY)
+            q.maxProjectedY = q.projected[i].y;
         }
 
       } else {
@@ -1209,6 +1162,46 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
   }
 
+  void updateCursor() {
+    mousePos = GetMousePos();
+
+    //GetMouseWheel
+
+    float bestDsquared = drawDistance * drawDistance;
+    cursorQuad = nullptr;
+
+    for (auto& q : quads) {
+      if (!q.visible || q.partials.size() > 0) continue;
+      if (mousePos.x > q.minProjectedX && mousePos.x < q.maxProjectedX &&
+          mousePos.y > q.minProjectedY && mousePos.y < q.maxProjectedY) {
+        float dx[4];
+        float dy[4];
+
+        for (int i = 0; i < 4; i++) {
+          dx[i] = q.projected[i].x - mousePos.x;
+          dy[i] = q.projected[i].y - mousePos.y;
+          float d = std::sqrt(std::pow(dx[i], 2) + std::pow(dy[i], 2));
+          dx[i] /= d;
+          dy[i] /= d;
+        }
+
+        float totalAngle = 0;
+        for (int i = 0; i < 4; i++) {
+          float dotProduct = dx[i] * dx[(i + 1) % 4] + dy[i] * dy[(i + 1) % 4];
+          totalAngle += std::acos(dotProduct);
+        }
+
+        if (std::abs(totalAngle - 6.28318) < 0.0001 &&
+            q.dSquared < bestDsquared) {
+          bestDsquared = q.dSquared;
+          cursorX = q.mapX;
+          cursorY = q.mapY;
+          cursorQuad = &q;
+        }
+      }
+    }
+  }
+
   void sortQuads() {
     sortedQuads.clear();
 
@@ -1218,8 +1211,12 @@ class Olc3d2 : public olc::PixelGameEngine {
       float fade = 1 - std::sqrt(quad.dSquared) / drawDistance;
       if (fade < 0) continue;
 
-      int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
-      quad.colour = olc::Pixel(rgb, rgb, rgb);
+      if (cursorX == quad.mapX && cursorY == quad.mapY) {
+        quad.colour = olc::Pixel(255, 255, 255);
+      } else {
+        int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
+        quad.colour = olc::Pixel(rgb, rgb, rgb);
+      }
 
       sortedQuads.push_back(&quad);
     }
@@ -1261,12 +1258,11 @@ class Olc3d2 : public olc::PixelGameEngine {
     for (auto q : quads) {
       if (q.partials.size() > 0) {
         for (auto p : q.partials) {
-          
           olc::vf2d pv[4] = {
               {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
               {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
               {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
-              {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};          
+              {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
 
           DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
                    -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
@@ -1364,11 +1360,6 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << mousePos.y - h / 2;
 
     DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
-
-    if (cursor.visible) {
-      DrawWarpedDecal(texture[selectedTexture].decal, cursor.projected,
-                      olc::Pixel(255, 255, 255, 192));
-    }
   }
 
   bool OnUserUpdate(float fElapsedTime) override {
@@ -1378,9 +1369,9 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     handleMovement();
 
-    updateCursor();
-
     updateQuads();
+
+    updateCursor();
 
     Clear(olc::BLACK);
 
