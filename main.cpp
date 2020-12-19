@@ -83,12 +83,14 @@ struct quad {
   olc::Pixel colour;
   int mapX;
   int mapY;
+  int wallF;
+  int wallD;
   quad() {
     mapX = -1;
     mapY = -1;
   };
   quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall, int _mapX,
-       int _mapY, int textureNo = 7, olc::Pixel _colour = olc::WHITE) {
+       int _mapY, int textureNo = 7, int _wallF = 0, int _wallD = -1) {
     vertices[0] = _p0;
     vertices[1] = _p1;
     vertices[2] = _p2;
@@ -100,7 +102,8 @@ struct quad {
     mapX = _mapX;
     mapY = _mapY;
     wall = _wall;
-    colour = _colour;
+    wallF = _wallF;
+    wallD = _wallD;
     renderable = &texture[textureNo];
   }
 };
@@ -113,18 +116,22 @@ enum class cellType { empty, wall, corridor, lowroom, highroom, sky };
 struct mapCell {
   cellType type;
   int floor;
-  int wall;
   int ceiling;
-  mapCell(cellType _type = cellType::wall, int _floor = 174, int _wall = 174,
-          int _ceiling = 174) {
+  int wall[3][4];
+  mapCell() { type = cellType::empty; }
+  mapCell(cellType _type, int _floor, int _wall[3][4], int _ceiling) {
     type = _type;
     floor = _floor;
-    wall = _wall;
+    for (int f = 0; f < 3; f++) {
+      for (int d = 0; d < 4; d++) {
+        wall[f][d] = _wall[f][d];
+      }
+    }
     ceiling = _ceiling;
   }
 };
 
-struct mazeCell {
+struct kruskalCell {
   int set;
   bool right;
   bool down;
@@ -135,7 +142,7 @@ const int mazeWidth = 40;
 const int mazeHeight = 40;
 
 mapCell map[mazeWidth * 2 + 1][mazeHeight * 2 + 1];
-mazeCell maze[mazeWidth][mazeHeight];
+kruskalCell kruskalMaze[mazeWidth][mazeHeight];
 
 void clearMap() {
   for (int i = -mazeWidth; i <= mazeWidth; i++) {
@@ -143,12 +150,20 @@ void clearMap() {
       if (i == -mazeWidth || j == -mazeWidth || i == mazeWidth ||
           j == mazeWidth) {
         map[i + mazeWidth][j + mazeHeight].type = cellType::wall;
-        map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+          }
+        }
         map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
         map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
       } else {
         map[i + mazeWidth][j + mazeHeight].type = cellType::sky;
-        map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+          }
+        }
         map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
         map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
       }
@@ -206,13 +221,13 @@ void regenerateQuads() {
         quads.push_back(quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
                              vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1),
                              false, i + mazeWidth, j + mazeHeight,
-                             map[i + mazeWidth][j + mazeHeight].floor));
+                             map[i + mazeWidth][j + mazeHeight].floor, 0));
 
         if (map[i + mazeWidth][j + mazeHeight].type == cellType::corridor) {
           quads.push_back(quad(vertex(x4, y4, 0, -1), vertex(x3, y3, 0, -1),
                                vertex(x2, y2, 0, -1), vertex(x1, y1, 0, -1),
                                false, i + mazeWidth, j + mazeHeight,
-                               map[i + mazeWidth][j + mazeHeight].ceiling));
+                               map[i + mazeWidth][j + mazeHeight].ceiling, 1));
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type == cellType::lowroom) {
@@ -220,7 +235,7 @@ void regenerateQuads() {
               quad(vertex(x4, y4, -unit, -1), vertex(x3, y3, -unit, -1),
                    vertex(x2, y2, -unit, -1), vertex(x1, y1, -unit, -1), false,
                    i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth][j + mazeHeight].ceiling));
+                   map[i + mazeWidth][j + mazeHeight].ceiling, 2));
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type == cellType::highroom) {
@@ -228,40 +243,44 @@ void regenerateQuads() {
               quad(vertex(x4, y4, -unit * 2, -1), vertex(x3, y3, -unit * 2, -1),
                    vertex(x2, y2, -unit * 2, -1), vertex(x1, y1, -unit * 2, -1),
                    false, i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth][j + mazeHeight].ceiling));
+                   map[i + mazeWidth][j + mazeHeight].ceiling, 3));
         }
 
       } else if (map[i + mazeWidth][j + mazeHeight].type == cellType::wall) {
         if (j > -mazeHeight &&
             map[i + mazeWidth][j + mazeHeight - 1].type != cellType::wall) {
-          quads.push_back(quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
-                               vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0),
-                               true, i + mazeWidth, j + mazeHeight,
-                               map[i + mazeWidth][j + mazeHeight - 1].wall));
+          quads.push_back(
+              quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
+                   vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0), true,
+                   i + mazeWidth, j + mazeHeight,
+                   map[i + mazeWidth][j + mazeHeight - 1].wall[0][0], 0, 0));
         }
 
         if (i < mazeWidth - 1 &&
             map[i + mazeWidth + 1][j + mazeHeight].type != cellType::wall) {
-          quads.push_back(quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
-                               vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0),
-                               true, i + mazeWidth, j + mazeHeight,
-                               map[i + mazeWidth + 1][j + mazeHeight].wall));
+          quads.push_back(
+              quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
+                   vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0), true,
+                   i + mazeWidth, j + mazeHeight,
+                   map[i + mazeWidth + 1][j + mazeHeight].wall[0][1], 0, 1));
         }
 
         if (j < mazeHeight - 1 &&
             map[i + mazeWidth][j + mazeHeight + 1].type != cellType::wall) {
-          quads.push_back(quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
-                               vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0),
-                               true, i + mazeWidth, j + mazeHeight,
-                               map[i + mazeWidth][j + mazeHeight + 1].wall));
+          quads.push_back(
+              quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
+                   vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0), true,
+                   i + mazeWidth, j + mazeHeight,
+                   map[i + mazeWidth][j + mazeHeight + 1].wall[0][2], 0, 2));
         }
 
         if (i > -mazeHeight &&
             map[i + mazeWidth - 1][j + mazeHeight].type != cellType::wall) {
-          quads.push_back(quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
-                               vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0),
-                               true, i + mazeWidth, j + mazeHeight,
-                               map[i + mazeWidth - 1][j + mazeHeight].wall));
+          quads.push_back(
+              quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
+                   vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0), true,
+                   i + mazeWidth, j + mazeHeight,
+                   map[i + mazeWidth - 1][j + mazeHeight].wall[0][3], 0, 3));
         }
       }
 
@@ -297,7 +316,7 @@ void regenerateQuads() {
               vertex(x2, y2, k * unit, 3), vertex(x2, y2, k * unit - unit, 2),
               vertex(x1, y1, k * unit - unit, 1), vertex(x1, y1, k * unit, 0),
               true, i + mazeWidth, j + mazeHeight,
-              map[i + mazeWidth][j + mazeHeight].wall));
+              map[i + mazeWidth][j + mazeHeight].wall[1 - k][0], 1 - k, 0));
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
@@ -331,7 +350,7 @@ void regenerateQuads() {
               vertex(x3, y3, k * unit, 3), vertex(x3, y3, k * unit - unit, 2),
               vertex(x2, y2, k * unit - unit, 1), vertex(x2, y2, k * unit, 0),
               true, i + mazeWidth, j + mazeHeight,
-              map[i + mazeWidth][j + mazeHeight].wall));
+              map[i + mazeWidth][j + mazeHeight].wall[1 - k][1], 1 - k, 1));
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
@@ -365,7 +384,7 @@ void regenerateQuads() {
               vertex(x4, y4, k * unit, 3), vertex(x4, y4, k * unit - unit, 2),
               vertex(x3, y3, k * unit - unit, 1), vertex(x3, y3, k * unit, 0),
               true, i + mazeWidth, j + mazeHeight,
-              map[i + mazeWidth][j + mazeHeight].wall));
+              map[i + mazeWidth][j + mazeHeight].wall[1 - k][2], 1 - k, 2));
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
@@ -399,7 +418,7 @@ void regenerateQuads() {
               vertex(x1, y1, k * unit, 3), vertex(x1, y1, k * unit - unit, 2),
               vertex(x4, y4, k * unit - unit, 1), vertex(x4, y4, k * unit, 0),
               true, i + mazeWidth, j + mazeHeight,
-              map[i + mazeWidth][j + mazeHeight].wall));
+              map[i + mazeWidth][j + mazeHeight].wall[1 - k][3], 1 - k, 3));
         }
       }
     }
@@ -410,7 +429,7 @@ bool kruskalStep() {
   bool oneSet = true;
   for (int i = 0; i < mazeWidth; i++) {
     for (int j = 0; j < mazeHeight; j++) {
-      if (maze[i][j].set != maze[0][0].set) {
+      if (kruskalMaze[i][j].set != kruskalMaze[0][0].set) {
         oneSet = false;
       }
     }
@@ -431,23 +450,25 @@ bool kruskalStep() {
       vertical = 1;
     }
 
-    if (horizontal > 0 && (maze[x][y].right || x == mazeWidth - 1)) continue;
-    if (vertical > 0 && (maze[x][y].down || y == mazeHeight - 1)) continue;
+    if (horizontal > 0 && (kruskalMaze[x][y].right || x == mazeWidth - 1))
+      continue;
+    if (vertical > 0 && (kruskalMaze[x][y].down || y == mazeHeight - 1))
+      continue;
 
-    a = maze[x][y].set;
-    b = maze[x + horizontal][y + vertical].set;
+    a = kruskalMaze[x][y].set;
+    b = kruskalMaze[x + horizontal][y + vertical].set;
 
     if (a == b) continue;
 
     if (vertical > 0) {
-      maze[x][y].down = true;
+      kruskalMaze[x][y].down = true;
     } else {
-      maze[x][y].right = true;
+      kruskalMaze[x][y].right = true;
     }
     for (int i = 0; i < mazeWidth; i++) {
       for (int j = 0; j < mazeHeight; j++) {
-        if (maze[i][j].set == b) {
-          maze[i][j].set = a;
+        if (kruskalMaze[i][j].set == b) {
+          kruskalMaze[i][j].set = a;
         }
       }
     }
@@ -456,14 +477,45 @@ bool kruskalStep() {
   }
 }
 
-void randomiseMap() {
+void randomizeAll() {
+  for (int i = -mazeWidth; i <= mazeWidth; i++) {
+    for (int j = -mazeHeight; j <= mazeHeight; j++) {
+      switch (rand() % 5) {
+        case 0:
+          map[i + mazeWidth][j + mazeHeight].type = cellType::corridor;
+          break;
+        case 1:
+          map[i + mazeWidth][j + mazeHeight].type = cellType::wall;
+          break;
+        case 2:
+          map[i + mazeWidth][j + mazeHeight].type = cellType::lowroom;
+          break;
+        case 3:
+          map[i + mazeWidth][j + mazeHeight].type = cellType::highroom;
+          break;
+        case 4:
+          map[i + mazeWidth][j + mazeHeight].type = cellType::sky;
+          break;
+      }
+      map[i + mazeWidth][j + mazeHeight].floor = rand() % 176;
+      for (int f = 0; f < 3; f++) {
+        for (int d = 0; d < 4; d++) {
+          map[i + mazeWidth][j + mazeHeight].wall[f][d] = rand() % 176;
+        }
+      }
+      map[i + mazeWidth][j + mazeHeight].ceiling = rand() % 176;
+    }
+  }
+}
+
+void makeMaze() {
   int n = 0;
   for (int i = 0; i < mazeWidth; i++) {
     for (int j = 0; j < mazeHeight; j++) {
       n++;
-      maze[i][j].set = n;
-      maze[i][j].right = false;
-      maze[i][j].down = false;
+      kruskalMaze[i][j].set = n;
+      kruskalMaze[i][j].right = false;
+      kruskalMaze[i][j].down = false;
     }
   }
 
@@ -479,23 +531,38 @@ void randomiseMap() {
               ? cellType::corridor
               : cellType::wall;
       map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
-      map[i + mazeWidth][j + mazeHeight].wall = defaultWall;
+
+      for (int f = 0; f < 3; f++) {
+        for (int d = 0; d < 4; d++) {
+          map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+        }
+      }
       map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
     }
   }
 
   for (int i = 0; i < mazeWidth; i++) {
     for (int j = 0; j < mazeHeight; j++) {
-      if (maze[i][j].right) {
+      if (kruskalMaze[i][j].right) {
         map[i * 2 + 2][j * 2 + 1].type = cellType::corridor;
         map[i * 2 + 2][j * 2 + 1].floor = defaultFloor;
-        map[i * 2 + 2][j * 2 + 1].wall = defaultWall;
+
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i * 2 + 2][j * 2 + 1].wall[f][d] = defaultWall;
+          }
+        }
         map[i * 2 + 2][j * 2 + 1].ceiling = defaultCeiling;
       }
-      if (maze[i][j].down) {
+      if (kruskalMaze[i][j].down) {
         map[i * 2 + 1][j * 2 + 2].type = cellType::corridor;
         map[i * 2 + 1][j * 2 + 2].floor = defaultFloor;
-        map[i * 2 + 1][j * 2 + 2].wall = defaultWall;
+
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i * 2 + 1][j * 2 + 2].wall[f][d] = defaultWall;
+          }
+        }
         map[i * 2 + 1][j * 2 + 2].ceiling = defaultCeiling;
       }
     }
@@ -510,7 +577,12 @@ void randomiseMap() {
       for (int j = y; j <= y + rh; j++) {
         map[i][j].type = cellType::lowroom;
         map[i][j].floor = defaultFloor;
-        map[i][j].wall = defaultWall;
+
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i][j].wall[f][d] = defaultWall;
+          }
+        }
         map[i][j].ceiling = defaultCeiling;
       }
     }
@@ -525,7 +597,12 @@ void randomiseMap() {
       for (int j = y; j <= y + rh; j++) {
         map[i][j].type = cellType::highroom;
         map[i][j].floor = defaultFloor;
-        map[i][j].wall = defaultWall;
+
+        for (int f = 0; f < 3; f++) {
+          for (int d = 0; d < 4; d++) {
+            map[i][j].wall[f][d] = defaultWall;
+          }
+        }
         map[i][j].ceiling = defaultCeiling;
       }
     }
@@ -592,10 +669,35 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
 
+    int mouseWheel = GetMouseWheel();
+
+    if (mouseWheel < 0) {
+      // std::cout << "down: " << mouseWheel << std::endl;
+    }
+    if (mouseWheel > 0) {
+      // std::cout << "up: " << mouseWheel << std::endl;
+    }
+
     if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
         cursorY <= mazeHeight * 2) {
       if (GetMouse(0).bHeld && cursorQuad != nullptr) {
+        int x = cursorQuad->mapX;
+        int y = cursorQuad->mapY;
+        int f = cursorQuad->wallF;
+        int d = cursorQuad->wallD;
+
+        if (cursorQuad->wall) {
+          map[x][y].wall[f][d] = selectedTexture;
+        } else {
+          if (f == 0) {
+            map[x][y].floor = selectedTexture;
+          } else {
+            map[x][y].ceiling = selectedTexture;
+          }
+        }
+
         cursorQuad->renderable = &texture[selectedTexture];
+
       } else if (GetKey(olc::Key::B).bHeld) {
         setQuadTexture(cursorX, cursorY, selectedTexture, false);
       } else if (GetKey(olc::Key::G).bHeld) {
@@ -650,7 +752,12 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (zoom > w * 5) zoom = w * 5;
 
     if (GetKey(olc::Key::M).bPressed) {
-      randomiseMap();
+      makeMaze();
+      regenerateQuads();
+    }
+
+    if (GetKey(olc::Key::N).bPressed) {
+      randomizeAll();
       regenerateQuads();
     }
 
@@ -1164,8 +1271,6 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   void updateCursor() {
     mousePos = GetMousePos();
-
-    //GetMouseWheel
 
     float bestDsquared = drawDistance * drawDistance;
     cursorQuad = nullptr;
