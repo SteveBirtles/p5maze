@@ -7,6 +7,7 @@ const int tileSize = 64;
 const float omega = 0.1;
 float drawDistance = 1500;
 float zoom = w / 2;
+bool day = true;
 
 const int defaultFloor = 97;
 const int defaultWall = 154;
@@ -492,37 +493,6 @@ bool kruskalStep() {
   }
 }
 
-void randomizeAll() {
-  for (int i = -mazeWidth; i <= mazeWidth; i++) {
-    for (int j = -mazeHeight; j <= mazeHeight; j++) {
-      switch (rand() % 5) {
-        case 0:
-          map[i + mazeWidth][j + mazeHeight].type = cellType::corridor;
-          break;
-        case 1:
-          map[i + mazeWidth][j + mazeHeight].type = cellType::wall;
-          break;
-        case 2:
-          map[i + mazeWidth][j + mazeHeight].type = cellType::lowroom;
-          break;
-        case 3:
-          map[i + mazeWidth][j + mazeHeight].type = cellType::highroom;
-          break;
-        case 4:
-          map[i + mazeWidth][j + mazeHeight].type = cellType::sky;
-          break;
-      }
-      map[i + mazeWidth][j + mazeHeight].floor = rand() % 176;
-      for (int f = 0; f < 3; f++) {
-        for (int d = 0; d < 4; d++) {
-          map[i + mazeWidth][j + mazeHeight].wall[f][d] = rand() % 176;
-        }
-      }
-      map[i + mazeWidth][j + mazeHeight].ceiling = rand() % 176;
-    }
-  }
-}
-
 void makeMaze() {
   int n = 0;
   for (int i = 0; i < mazeWidth; i++) {
@@ -823,8 +793,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
 
     if (GetKey(olc::Key::N).bPressed) {
-      randomizeAll();
-      regenerateQuads();
+      day = !day;      
     }
 
     if (GetKey(olc::Key::G).bPressed) {
@@ -1395,8 +1364,17 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (cursorX == quad.mapX && cursorY == quad.mapY) {
         quad.colour = olc::Pixel(255, 255, 255);
       } else {
-        int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
-        quad.colour = olc::Pixel(rgb, rgb, rgb);
+        if (day) {
+          int alpha = 255;
+          if (fade < 0.25) {
+            alpha = static_cast<int>(255.0f * 4 * fade);
+          }
+          int rgb = static_cast<int>(64 + 128 * std::pow(fade, 2));
+          quad.colour = olc::Pixel(rgb, rgb, rgb, alpha);
+        } else {
+          int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
+          quad.colour = olc::Pixel(rgb, rgb, rgb);
+        }
       }
 
       sortedQuads.push_back(&quad);
@@ -1565,7 +1543,11 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     updateCursor();
 
-    Clear(olc::BLACK);
+    if (day) {
+      Clear(olc::Pixel(96, 128, 255));
+    } else {
+      Clear(olc::BLACK);
+    }
 
     if (GetKey(olc::Key::TAB).bHeld) {
       showMazeMap();
