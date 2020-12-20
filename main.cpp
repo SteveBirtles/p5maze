@@ -646,18 +646,18 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
   }
 
-  void handleInputs() {
+  void handleInputs(float frameLength) {
     mousePos = GetMousePos();
 
-    if (GetMouse(2).bHeld) {
+    if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) {
       int iMax = static_cast<int>(w / (tileSize + 10));
       int jMax = static_cast<int>(176 / iMax) + 1;
 
-      selectedTexture = static_cast<int>((mousePos.y < jMax * (tileSize + 10.0f)
-                                              ? mousePos.y
-                                              : jMax * (tileSize + 10.0f) - 1) /
-                                         (tileSize + 10.0f)) *                            iMax +
-                        static_cast<int>(mousePos.x / (tileSize + 10.0f));
+      selectedTexture =
+          static_cast<int>(mousePos.y / (tileSize + 10.0f)) * iMax +
+          static_cast<int>(mousePos.x < (iMax - 1) * (tileSize + 10.0f)
+                               ? mousePos.x / (tileSize + 10.0f)
+                               : (iMax - 1));
 
       if (selectedTexture < 0) selectedTexture = 0;
       if (selectedTexture > 175) selectedTexture = 175;
@@ -668,8 +668,8 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (mouseWheel < 0) selectedTexture = (selectedTexture + 1) % 176;
       if (mouseWheel > 0) selectedTexture = (selectedTexture + 175) % 176;
 
-      if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
-      if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
+      if (GetKey(olc::Key::LEFT).bHeld) angle += 2 * frameLength;
+      if (GetKey(olc::Key::RIGHT).bHeld) angle -= 2 * frameLength;
 
       if (quad::cursorQuad != nullptr) {
         int x = quad::cursorQuad->mapX;
@@ -791,8 +791,8 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (drawDistance > unit * mazeWidth * 2)
         drawDistance = unit * mazeWidth * 2;
 
-      if (GetKey(olc::Key::PGDN).bHeld) pitch += 0.025;
-      if (GetKey(olc::Key::PGUP).bHeld) pitch -= 0.025;
+      if (GetKey(olc::Key::PGDN).bHeld) pitch += 2 * frameLength;
+      if (GetKey(olc::Key::PGUP).bHeld) pitch -= 2 * frameLength;
 
       if (GetKey(olc::Key::HOME).bHeld) {
         pitch = 0;
@@ -806,6 +806,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (zoom > w * 5) zoom = w * 5;
 
       if (GetKey(olc::Key::M).bPressed) {
+        day = false;
         makeMaze();
         regenerateQuads();
       }
@@ -815,6 +816,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       }
 
       if (GetKey(olc::Key::G).bPressed) {
+        day = true;
         clearMap();
         regenerateQuads();
       }
@@ -827,28 +829,28 @@ class Olc3d2 : public olc::PixelGameEngine {
       lastAngle = angle;
 
       if (GetKey(olc::Key::W).bHeld) {
-        myX += std::sin(angle) * 5;
-        myY += std::cos(angle) * 5;
+        myX += std::sin(angle) * unit * 2 * frameLength;
+        myY += std::cos(angle) * unit * 2 * frameLength;
       }
       if (GetKey(olc::Key::S).bHeld) {
-        myX -= std::sin(angle) * 5;
-        myY -= std::cos(angle) * 5;
+        myX -= std::sin(angle) * unit * 2 * frameLength;
+        myY -= std::cos(angle) * unit * 2 * frameLength;
       }
       if (GetKey(olc::Key::A).bHeld) {
-        myX += std::cos(angle) * 5;
-        myY += -std::sin(angle) * 5;
+        myX += std::cos(angle) * unit * 2 * frameLength;
+        myY += -std::sin(angle) * unit * 2 * frameLength;
       }
       if (GetKey(olc::Key::D).bHeld) {
-        myX -= std::cos(angle) * 5;
-        myY -= -std::sin(angle) * 5;
+        myX -= std::cos(angle) * unit * 2 * frameLength;
+        myY -= -std::sin(angle) * unit * 2 * frameLength;
       }
-      if (GetKey(olc::Key::R).bHeld) myZ -= 5;
-      if (GetKey(olc::Key::F).bHeld) myZ += 5;
+      if (GetKey(olc::Key::R).bHeld) myZ -= unit * 2 * frameLength;
+      if (GetKey(olc::Key::F).bHeld) myZ += unit * 2 * frameLength;
       if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
     }
   }
 
-  void handleMovement() {
+  void handleInteractions() {
     int mapX = myX / unit + mazeWidth;
     int mapY = myY / unit + mazeHeight;
 
@@ -1329,7 +1331,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   void updateCursor() {
-    if (GetMouse(2).bHeld) return;
+    if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) return;
 
     float bestDsquared = drawDistance * drawDistance;
 
@@ -1533,7 +1535,8 @@ class Olc3d2 : public olc::PixelGameEngine {
     stringStream << "Quads: " << qCount << " (Max: " << qMax
                  << ") Zoom: " << static_cast<int>(200 * zoom / w)
                  << "%  Mouse: " << mousePos.x - w / 2 << ", "
-                 << mousePos.y - h / 2 << " Range: " << drawDistance;
+                 << mousePos.y - h / 2 << " Range: " << drawDistance << " | "
+                 << GetFPS() << " FPS";
 
     DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
 
@@ -1565,11 +1568,11 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   bool OnUserUpdate(float fElapsedTime) override {
-    handleInputs();
+    handleInputs(fElapsedTime);
 
     updateMatrix();
 
-    handleMovement();
+    handleInteractions();
 
     updateQuads();
 
@@ -1588,7 +1591,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     } else {
       sortQuads();
       renderQuads();
-      if (GetMouse(2).bHeld) {
+      if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) {
         showTileSelector();
       } else {
         DrawDecal({w - (tileSize + 10), 10}, texture[selectedTexture].decal,
