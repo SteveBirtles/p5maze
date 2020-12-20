@@ -63,6 +63,7 @@ struct partial {
 };
 
 struct quad {
+  static quad* cursorQuad;
   Renderable* renderable;
   std::array<vertex, 4> vertices;
   std::array<vertex, 4> adjusted;
@@ -106,19 +107,26 @@ struct quad {
     wallD = _wallD;
     renderable = &texture[textureNo];
   }
+  ~quad() {
+    if (quad::cursorQuad == this) {
+      quad::cursorQuad = nullptr;
+    }
+  }
 };
+
+quad* quad::cursorQuad = nullptr;
 
 std::vector<quad> quads;
 std::vector<quad*> sortedQuads;
 
-enum class cellType { empty, wall, corridor, lowroom, highroom, sky };
+enum class cellType { wall, corridor, lowroom, highroom, sky };
 
 struct mapCell {
   cellType type;
   int floor;
   int ceiling;
   int wall[3][4];
-  mapCell() { type = cellType::empty; }
+  mapCell() { type = cellType::sky; }
   mapCell(cellType _type, int _floor, int _wall[3][4], int _ceiling) {
     type = _type;
     floor = _floor;
@@ -249,38 +257,38 @@ void regenerateQuads() {
       } else if (map[i + mazeWidth][j + mazeHeight].type == cellType::wall) {
         if (j > -mazeHeight &&
             map[i + mazeWidth][j + mazeHeight - 1].type != cellType::wall) {
-          quads.push_back(
-              quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
-                   vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0), true,
-                   i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth][j + mazeHeight - 1].wall[0][0], 0, 0));
+          quads.push_back(quad(vertex(x2, y2, unit, 3), vertex(x2, y2, 0.0f, 2),
+                               vertex(x1, y1, 0.0f, 1), vertex(x1, y1, unit, 0),
+                               true, i + mazeWidth, j + mazeHeight,
+                               map[i + mazeWidth][j + mazeHeight].wall[0][0], 0,
+                               0));
         }
 
         if (i < mazeWidth - 1 &&
             map[i + mazeWidth + 1][j + mazeHeight].type != cellType::wall) {
-          quads.push_back(
-              quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
-                   vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0), true,
-                   i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth + 1][j + mazeHeight].wall[0][1], 0, 1));
+          quads.push_back(quad(vertex(x3, y3, unit, 3), vertex(x3, y3, 0.0f, 2),
+                               vertex(x2, y2, 0.0f, 1), vertex(x2, y2, unit, 0),
+                               true, i + mazeWidth, j + mazeHeight,
+                               map[i + mazeWidth][j + mazeHeight].wall[0][1], 0,
+                               1));
         }
 
         if (j < mazeHeight - 1 &&
             map[i + mazeWidth][j + mazeHeight + 1].type != cellType::wall) {
-          quads.push_back(
-              quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
-                   vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0), true,
-                   i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth][j + mazeHeight + 1].wall[0][2], 0, 2));
+          quads.push_back(quad(vertex(x4, y4, unit, 3), vertex(x4, y4, 0.0f, 2),
+                               vertex(x3, y3, 0.0f, 1), vertex(x3, y3, unit, 0),
+                               true, i + mazeWidth, j + mazeHeight,
+                               map[i + mazeWidth][j + mazeHeight].wall[0][2], 0,
+                               2));
         }
 
         if (i > -mazeHeight &&
             map[i + mazeWidth - 1][j + mazeHeight].type != cellType::wall) {
-          quads.push_back(
-              quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
-                   vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0), true,
-                   i + mazeWidth, j + mazeHeight,
-                   map[i + mazeWidth - 1][j + mazeHeight].wall[0][3], 0, 3));
+          quads.push_back(quad(vertex(x1, y1, unit, 3), vertex(x1, y1, 0.0f, 2),
+                               vertex(x4, y4, 0.0f, 1), vertex(x4, y4, unit, 0),
+                               true, i + mazeWidth, j + mazeHeight,
+                               map[i + mazeWidth][j + mazeHeight].wall[0][3], 0,
+                               3));
         }
       }
 
@@ -633,10 +641,11 @@ class Olc3d2 : public olc::PixelGameEngine {
   float myX = unit / 2;
   float myY = unit / 2;
   float myZ = unit / 2;
-  float lastMyX, lastMyY;
+  float lastMyX, lastMyY, lastAngle;
   olc::vi2d mousePos;
+  olc::vi2d lastMousePos;
   int cursorX, cursorY;
-  quad* cursorQuad;
+
   int selectedTexture = 1;
 
   int qMax = 0;
@@ -661,32 +670,72 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   void handleInputs() {
-    if (GetKey(olc::Key::UP).bPressed)
-      selectedTexture = (selectedTexture + 1) % 176;
-    if (GetKey(olc::Key::DOWN).bPressed)
-      selectedTexture = (selectedTexture + 175) % 176;
+    int mouseWheel = GetMouseWheel();
+
+    if (mouseWheel < 0) selectedTexture = (selectedTexture + 1) % 176;
+    if (mouseWheel > 0) selectedTexture = (selectedTexture + 175) % 176;
 
     if (GetKey(olc::Key::LEFT).bHeld) angle += 0.025;
     if (GetKey(olc::Key::RIGHT).bHeld) angle -= 0.025;
 
-    int mouseWheel = GetMouseWheel();
+    if (quad::cursorQuad != nullptr) {
+      int x = quad::cursorQuad->mapX;
+      int y = quad::cursorQuad->mapY;
 
-    if (mouseWheel < 0) {
-      // std::cout << "down: " << mouseWheel << std::endl;
-    }
-    if (mouseWheel > 0) {
-      // std::cout << "up: " << mouseWheel << std::endl;
+      if (GetKey(olc::Key::DOWN).bPressed) {
+        switch (map[x][y].type) {
+          case cellType::sky:
+            map[x][y].type = cellType::highroom;
+            regenerateQuads();
+            break;
+          case cellType::highroom:
+            map[x][y].type = cellType::lowroom;
+            regenerateQuads();
+            break;
+          case cellType::lowroom:
+            map[x][y].type = cellType::corridor;
+            regenerateQuads();
+            break;
+          case cellType::corridor:
+            map[x][y].type = cellType::wall;
+            regenerateQuads();
+            break;
+        }
+        quad::cursorQuad = nullptr;
+      }
+
+      if (GetKey(olc::Key::UP).bPressed) {
+        switch (map[x][y].type) {
+          case cellType::highroom:
+            map[x][y].type = cellType::sky;
+            regenerateQuads();
+            break;
+          case cellType::lowroom:
+            map[x][y].type = cellType::highroom;
+            regenerateQuads();
+            break;
+          case cellType::corridor:
+            map[x][y].type = cellType::lowroom;
+            regenerateQuads();
+            break;
+          case cellType::wall:
+            map[x][y].type = cellType::corridor;
+            regenerateQuads();
+            break;
+        }
+        quad::cursorQuad = nullptr;
+      }
     }
 
     if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
         cursorY <= mazeHeight * 2) {
-      if (GetMouse(0).bHeld && cursorQuad != nullptr) {
-        int x = cursorQuad->mapX;
-        int y = cursorQuad->mapY;
-        int f = cursorQuad->wallF;
-        int d = cursorQuad->wallD;
+      if (GetMouse(0).bHeld && quad::cursorQuad != nullptr) {
+        int x = quad::cursorQuad->mapX;
+        int y = quad::cursorQuad->mapY;
+        int f = quad::cursorQuad->wallF;
+        int d = quad::cursorQuad->wallD;
 
-        if (cursorQuad->wall) {
+        if (quad::cursorQuad->wall) {
           map[x][y].wall[f][d] = selectedTexture;
         } else {
           if (f == 0) {
@@ -696,7 +745,21 @@ class Olc3d2 : public olc::PixelGameEngine {
           }
         }
 
-        cursorQuad->renderable = &texture[selectedTexture];
+        quad::cursorQuad->renderable = &texture[selectedTexture];
+
+      } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
+        int x = quad::cursorQuad->mapX;
+        int y = quad::cursorQuad->mapY;
+        int f = quad::cursorQuad->wallF;
+        int d = quad::cursorQuad->wallD;
+
+        if (quad::cursorQuad->wall) {
+          selectedTexture = map[x][y].wall[f][d];
+        } else if (f == 0) {
+          selectedTexture = map[x][y].floor;
+        } else {
+          selectedTexture = map[x][y].ceiling;
+        }
 
       } else if (GetKey(olc::Key::B).bHeld) {
         setQuadTexture(cursorX, cursorY, selectedTexture, false);
@@ -771,6 +834,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     lastMyX = myX;
     lastMyY = myY;
+    lastAngle = angle;
 
     if (GetKey(olc::Key::W).bHeld) {
       myX += std::sin(angle) * 5;
@@ -1273,7 +1337,6 @@ class Olc3d2 : public olc::PixelGameEngine {
     mousePos = GetMousePos();
 
     float bestDsquared = drawDistance * drawDistance;
-    cursorQuad = nullptr;
 
     for (auto& q : quads) {
       if (!q.visible || q.partials.size() > 0) continue;
@@ -1301,10 +1364,13 @@ class Olc3d2 : public olc::PixelGameEngine {
           bestDsquared = q.dSquared;
           cursorX = q.mapX;
           cursorY = q.mapY;
-          cursorQuad = &q;
+
+          quad::cursorQuad = &q;
         }
       }
     }
+
+    lastMousePos = mousePos;
   }
 
   void sortQuads() {
@@ -1465,6 +1531,17 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << mousePos.y - h / 2;
 
     DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
+
+    if (quad::cursorQuad != nullptr) {
+      stringStream.str("");
+      stringStream << cursorX << ", " << cursorY << ": "
+                   << quad::cursorQuad->mapX << ", " << quad::cursorQuad->mapY
+                   << " [" << quad::cursorQuad->wall << "] "
+                   << quad::cursorQuad->wallF << " | "
+                   << quad::cursorQuad->wallD;
+
+      DrawStringDecal({10, 30}, stringStream.str(), olc::WHITE);
+    }
   }
 
   bool OnUserUpdate(float fElapsedTime) override {
@@ -1487,6 +1564,9 @@ class Olc3d2 : public olc::PixelGameEngine {
     } else {
       sortQuads();
       renderQuads();
+
+      DrawDecal({w - (tileSize + 10), 10}, texture[selectedTexture].decal,
+                {1, 1});
     }
 
     return true;
