@@ -73,6 +73,7 @@ struct quad {
   bool wall;
   bool cropped;
   double dSquared;
+  bool outOfRange;
   olc::vf2d projected[4];
   float minProjectedX;
   float minProjectedY;
@@ -146,8 +147,8 @@ struct kruskalCell {
 };
 
 const float unit = 100;
-const int mazeWidth = 40;
-const int mazeHeight = 40;
+const int mazeWidth = 40;   // MAX 100
+const int mazeHeight = 40;  // MAX 100
 
 mapCell map[mazeWidth * 2 + 1][mazeHeight * 2 + 1];
 kruskalCell kruskalMaze[mazeWidth][mazeHeight];
@@ -193,6 +194,7 @@ int clearQuads(int x, int y) {
 }
 
 int setQuadTexture(int x, int y, int id, bool wall, bool ceiling = false) {
+  if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeWidth) return 0;
   int setCount = 0;
   for (int i = 0; i < quads.size(); i++) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
@@ -203,6 +205,11 @@ int setQuadTexture(int x, int y, int id, bool wall, bool ceiling = false) {
         quads[i].renderable = &texture[id];
         setCount++;
       }
+    }
+  }
+  for (int f = 0; f < 3; f++) {
+    for (int d = 0; d < 4; d++) {
+      map[x][y].wall[f][d] = id;
     }
   }
   return setCount;
@@ -294,12 +301,12 @@ void regenerateQuads() {
 
       for (int k = -1; k <= 0; k++) {
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
-            (j > -mazeHeight &&
-                 (map[i + mazeWidth][j + mazeHeight - 1].type ==
-                          cellType::lowroom &&
-                      k == 0 ||
-                  map[i + mazeWidth][j + mazeHeight - 1].type ==
-                      cellType::highroom) &&
+            j > -mazeHeight &&
+            ((map[i + mazeWidth][j + mazeHeight - 1].type ==
+                      cellType::lowroom &&
+                  k == 0 ||
+              map[i + mazeWidth][j + mazeHeight - 1].type ==
+                  cellType::highroom) &&
                  map[i + mazeWidth][j + mazeHeight - 1].type !=
                      map[i + mazeWidth][j + mazeHeight].type &&
                  !((map[i + mazeWidth][j + mazeHeight - 1].type ==
@@ -328,12 +335,12 @@ void regenerateQuads() {
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
-            (i < mazeWidth - 1 &&
-                 (map[i + mazeWidth + 1][j + mazeHeight].type ==
-                          cellType::lowroom &&
-                      k == 0 ||
-                  map[i + mazeWidth + 1][j + mazeHeight].type ==
-                      cellType::highroom) &&
+            i < mazeWidth - 1 &&
+            ((map[i + mazeWidth + 1][j + mazeHeight].type ==
+                      cellType::lowroom &&
+                  k == 0 ||
+              map[i + mazeWidth + 1][j + mazeHeight].type ==
+                  cellType::highroom) &&
                  map[i + mazeWidth + 1][j + mazeHeight].type !=
                      map[i + mazeWidth][j + mazeHeight].type &&
                  !((map[i + mazeWidth + 1][j + mazeHeight].type ==
@@ -362,12 +369,12 @@ void regenerateQuads() {
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
-            (j < mazeHeight - 1 &&
-                 (map[i + mazeWidth][j + mazeHeight + 1].type ==
-                          cellType::lowroom &&
-                      k == 0 ||
-                  map[i + mazeWidth][j + mazeHeight + 1].type ==
-                      cellType::highroom) &&
+            j < mazeHeight - 1 &&
+            ((map[i + mazeWidth][j + mazeHeight + 1].type ==
+                      cellType::lowroom &&
+                  k == 0 ||
+              map[i + mazeWidth][j + mazeHeight + 1].type ==
+                  cellType::highroom) &&
                  map[i + mazeWidth][j + mazeHeight + 1].type !=
                      map[i + mazeWidth][j + mazeHeight].type &&
                  !((map[i + mazeWidth][j + mazeHeight + 1].type ==
@@ -396,12 +403,12 @@ void regenerateQuads() {
         }
 
         if (map[i + mazeWidth][j + mazeHeight].type != cellType::sky &&
-            (i > -mazeHeight &&
-                 (map[i + mazeWidth - 1][j + mazeHeight].type ==
-                          cellType::lowroom &&
-                      k == 0 ||
-                  map[i + mazeWidth - 1][j + mazeHeight].type ==
-                      cellType::highroom) &&
+            i > -mazeHeight &&
+            ((map[i + mazeWidth - 1][j + mazeHeight].type ==
+                      cellType::lowroom &&
+                  k == 0 ||
+              map[i + mazeWidth - 1][j + mazeHeight].type ==
+                  cellType::highroom) &&
                  map[i + mazeWidth - 1][j + mazeHeight].type !=
                      map[i + mazeWidth][j + mazeHeight].type &&
                  !((map[i + mazeWidth - 1][j + mazeHeight].type ==
@@ -761,12 +768,8 @@ class Olc3d2 : public olc::PixelGameEngine {
           selectedTexture = map[x][y].ceiling;
         }
 
-      } else if (GetKey(olc::Key::B).bHeld) {
-        setQuadTexture(cursorX, cursorY, selectedTexture, false);
-      } else if (GetKey(olc::Key::G).bHeld) {
-        setQuadTexture(cursorX, cursorY, selectedTexture, true);
       } else if (GetKey(olc::Key::T).bHeld) {
-        setQuadTexture(cursorX, cursorY, selectedTexture, false, true);
+        setQuadTexture(cursorX, cursorY, selectedTexture, true);
       } else if (GetKey(olc::Key::K1).bPressed) {
         if (map[cursorX][cursorY].type != cellType::wall) {
           map[cursorX][cursorY].type = cellType::wall;
@@ -952,6 +955,12 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   void updateQuads() {
     for (auto& q : quads) {
+      q.outOfRange = std::abs(q.vertices[0].x - myX) > drawDistance ||
+                     std::abs(q.vertices[0].y - myY) > drawDistance ||
+                     std::abs(q.vertices[0].z - myZ) > drawDistance;
+
+      if (q.outOfRange) continue;
+
       float maxX = 0;
       float maxY = 0;
       float maxZ = 0;
@@ -1377,6 +1386,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     sortedQuads.clear();
 
     for (auto& quad : quads) {
+      if (quad.outOfRange) continue;
       if (quad.dSquared > drawDistance * drawDistance) continue;
       if (quad.cropped && pitch != 0) continue;
       float fade = 1 - std::sqrt(quad.dSquared) / drawDistance;
