@@ -768,10 +768,12 @@ class Olc3d2 : public olc::PixelGameEngine {
       }
     }
 
-    if (GetKey(olc::Key::OEM_4).bHeld) drawDistance /= 1.05;
-    if (GetKey(olc::Key::OEM_6).bHeld) drawDistance *= 1.05;
+    if (GetKey(olc::Key::OEM_4).bHeld) drawDistance /= 1.01;
+    if (GetKey(olc::Key::OEM_6).bHeld) drawDistance *= 1.01;
 
     if (drawDistance < unit) drawDistance = unit;
+    if (drawDistance > unit * mazeWidth * 2)
+      drawDistance = unit * mazeWidth * 2;
 
     if (GetKey(olc::Key::PGDN).bHeld) pitch += 0.025;
     if (GetKey(olc::Key::PGUP).bHeld) pitch -= 0.025;
@@ -793,7 +795,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
 
     if (GetKey(olc::Key::N).bPressed) {
-      day = !day;      
+      day = !day;
     }
 
     if (GetKey(olc::Key::G).bPressed) {
@@ -925,8 +927,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   void updateQuads() {
     for (auto& q : quads) {
       q.outOfRange = std::abs(q.vertices[0].x - myX) > drawDistance ||
-                     std::abs(q.vertices[0].y - myY) > drawDistance ||
-                     std::abs(q.vertices[0].z - myZ) > drawDistance;
+                     std::abs(q.vertices[0].y - myY) > drawDistance;
 
       if (q.outOfRange) continue;
 
@@ -1516,7 +1517,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     stringStream << "Quads: " << qCount << " (Max: " << qMax
                  << ") Zoom: " << static_cast<int>(200 * zoom / w)
                  << "%  Mouse: " << mousePos.x - w / 2 << ", "
-                 << mousePos.y - h / 2;
+                 << mousePos.y - h / 2 << " Range: " << drawDistance;
 
     DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
 
