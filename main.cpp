@@ -1,17 +1,17 @@
 #define OLC_PGE_APPLICATION
-#include "olcPixelGameEngine.h"
 #include <filesystem>
+
+#include "olcPixelGameEngine.h"
 
 const int w = 1280;
 const int h = 1024;
 const int tileSize = 64;
 const float omega = 0.1;
-float drawDistance = 1500;
-
 float zoom = w / 2;
 bool day = true;
 bool showHelp = true;
 int levelNo = 1;
+bool exitSignal = false;
 
 const int defaultFloor = 97;
 const int defaultWall = 154;
@@ -152,11 +152,14 @@ struct kruskalCell {
 };
 
 const float unit = 100;
-const int mazeWidth = 40;   // MAX 100
-const int mazeHeight = 40;  // MAX 100
+const int MAX_WIDTH = 100;
+const int MAX_HEIGHT = 100;
+int mazeWidth = 40;
+int mazeHeight = 40;
+float drawDistance = 15 * unit;
 
-mapCell map[mazeWidth * 2 + 1][mazeHeight * 2 + 1];
-kruskalCell kruskalMaze[mazeWidth][mazeHeight];
+mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
+kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
 
 void clearMap() {
   for (int i = -mazeWidth; i <= mazeWidth; i++) {
@@ -586,7 +589,6 @@ void makeMaze() {
       for (int j = y; j <= y + rh; j++) {
         map[i][j].type = cellType::highroom;
         map[i][j].floor = defaultFloor;
-
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
             map[i][j].wall[f][d] = defaultWall;
@@ -599,16 +601,27 @@ void makeMaze() {
 }
 
 void saveLevel() {
-  std::ostringstream fileName;
-  fileName << "level" << levelNo << ".dat";
+  std::ostringstream filename;
+  filename << "./maps/level" << levelNo << ".dat";
 
-  std::filesystem::copy(fileName, fileName.str() + "_bak");
+  std::ifstream source(filename.str(), std::ios::in | std::ios::binary);
+  if (source.good()) {
+    std::ofstream backup(filename.str() + "_bak",
+                         std::ios::out | std::ios::binary);
+    backup << source.rdbuf();
+  }
 
-  std::ofstream output(fileName.str(), std::ios::out | std::ios::binary);
+  std::ofstream output(filename.str(), std::ios::out | std::ios::binary);
   if (!output) {
     std::cout << "Cannot open file!" << std::endl;
     return;
   }
+
+  int version = 1;
+  output.write((char*)&version, sizeof(version));
+  output.write((char*)&mazeWidth, sizeof(mazeWidth));
+  output.write((char*)&mazeHeight, sizeof(mazeHeight));
+  output.write((char*)&day, sizeof(day));
 
   for (int i = -mazeWidth; i <= mazeWidth; i++) {
     for (int j = -mazeHeight; j <= mazeHeight; j++) {
@@ -618,14 +631,44 @@ void saveLevel() {
 
   output.close();
   if (!output.good()) {
-    std::cout << "Error occurred at writing time!" << std::endl;
+    std::cout << "Error occurred saving level." << std::endl;
     return;
   }
 
-  std::cout << "Level saved: " << fileName.str() << std::endl;
+  std::cout << "Level saved: " << filename.str() << std::endl;
 }
 
-void loadLevel() { regenerateQuads(); }
+void loadLevel() {
+  std::ostringstream filename;
+  filename << "./maps/level" << levelNo << ".dat";
+
+  std::ifstream input(filename.str(), std::ios::in | std::ios::binary);
+  if (!input) {
+    std::cout << "Cannot open file!" << std::endl;
+    return;
+  }
+
+  int version;
+  input.read((char*)&version, sizeof(version));
+  input.read((char*)&mazeWidth, sizeof(mazeWidth));
+  input.read((char*)&mazeHeight, sizeof(mazeHeight));
+  input.read((char*)&day, sizeof(day));
+
+  for (int i = -mazeWidth; i <= mazeWidth; i++) {
+    for (int j = -mazeHeight; j <= mazeHeight; j++) {
+      input.read((char*)&map[i + mazeWidth][j + mazeHeight], sizeof(mapCell));
+    }
+  }
+  input.close();
+  if (!input.good()) {
+    std::cout << "Error occurred loading level." << std::endl;
+    return;
+  }
+
+  regenerateQuads();
+
+  std::cout << "Level loaded: " << filename.str() << std::endl;
+}
 
 class Olc3d2 : public olc::PixelGameEngine {
  public:
@@ -635,13 +678,12 @@ class Olc3d2 : public olc::PixelGameEngine {
   bool OnUserCreate() override {
     for (int i = 0; i < 176; i++) {
       std::ostringstream filename;
-      filename << "tiles/tile" << i << ".png";
+      filename << "./tiles/tile" << i << ".png";
       texture[i].Load(filename.str());
     }
 
     std::srand(std::time(nullptr));
-    clearMap();
-    regenerateQuads();
+    loadLevel();
 
     return true;
   }
@@ -767,6 +809,10 @@ class Olc3d2 : public olc::PixelGameEngine {
         levelNo = 9;
       } else if (GetKey(olc::Key::K0).bPressed) {
         levelNo = 10;
+      }
+
+      if (GetKey(olc::Key::Q).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+        exitSignal = true;
       }
 
       if (GetKey(olc::Key::S).bPressed && GetKey(olc::Key::CTRL).bHeld) {
@@ -1594,8 +1640,10 @@ class Olc3d2 : public olc::PixelGameEngine {
         stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
                      << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
                      << ", Level: " << quad::cursorQuad->wallF
-                     << ", Direction: " << quad::cursorQuad->wallD;
+                     << ", Direction: " << quad::cursorQuad->wallD << std::endl;
       }
+
+      stringStream << "./maps/level" << levelNo << ".dat";
 
       DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
     }
@@ -1681,7 +1729,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (showHelp) renderHelp();
     }
 
-    return true;
+    return !exitSignal;
   }
 };
 
