@@ -1,14 +1,17 @@
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
+#include <filesystem>
 
 const int w = 1280;
 const int h = 1024;
 const int tileSize = 64;
 const float omega = 0.1;
 float drawDistance = 1500;
+
 float zoom = w / 2;
 bool day = true;
 bool showHelp = true;
+int levelNo = 1;
 
 const int defaultFloor = 97;
 const int defaultWall = 154;
@@ -595,6 +598,35 @@ void makeMaze() {
   }
 }
 
+void saveLevel() {
+  std::ostringstream fileName;
+  fileName << "level" << levelNo << ".dat";
+
+  std::filesystem::copy(fileName, fileName.str() + "_bak");
+
+  std::ofstream output(fileName.str(), std::ios::out | std::ios::binary);
+  if (!output) {
+    std::cout << "Cannot open file!" << std::endl;
+    return;
+  }
+
+  for (int i = -mazeWidth; i <= mazeWidth; i++) {
+    for (int j = -mazeHeight; j <= mazeHeight; j++) {
+      output.write((char*)&map[i + mazeWidth][j + mazeHeight], sizeof(mapCell));
+    }
+  }
+
+  output.close();
+  if (!output.good()) {
+    std::cout << "Error occurred at writing time!" << std::endl;
+    return;
+  }
+
+  std::cout << "Level saved: " << fileName.str() << std::endl;
+}
+
+void loadLevel() { regenerateQuads(); }
+
 class Olc3d2 : public olc::PixelGameEngine {
  public:
   Olc3d2() { sAppName = "Olc3d2"; }
@@ -712,32 +744,37 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         } else if (GetKey(olc::Key::T).bHeld) {
           setQuadTexture(cursorX, cursorY, selectedTexture, true);
-        } else if (GetKey(olc::Key::K1).bPressed) {
-          // if (map[cursorX][cursorY].type != cellType::wall) {
-          //   map[cursorX][cursorY].type = cellType::wall;
-          //   regenerateQuads();
-          // }
-        } else if (GetKey(olc::Key::K2).bPressed) {
-          // if (map[cursorX][cursorY].type != cellType::corridor) {
-          //   map[cursorX][cursorY].type = cellType::corridor;
-          //   regenerateQuads();
-          // }
-        } else if (GetKey(olc::Key::K3).bPressed) {
-          // if (map[cursorX][cursorY].type != cellType::lowroom) {
-          //   map[cursorX][cursorY].type = cellType::lowroom;
-          //   regenerateQuads();
-          // }
-        } else if (GetKey(olc::Key::K4).bPressed) {
-          // if (map[cursorX][cursorY].type != cellType::highroom) {
-          //   map[cursorX][cursorY].type = cellType::highroom;
-          //   regenerateQuads();
-          // }
-        } else if (GetKey(olc::Key::K5).bPressed) {
-          // if (map[cursorX][cursorY].type != cellType::sky) {
-          //   map[cursorX][cursorY].type = cellType::sky;
-          //   regenerateQuads();
-          // }
         }
+      }
+
+      if (GetKey(olc::Key::K1).bPressed) {
+        levelNo = 1;
+      } else if (GetKey(olc::Key::K2).bPressed) {
+        levelNo = 2;
+      } else if (GetKey(olc::Key::K3).bPressed) {
+        levelNo = 3;
+      } else if (GetKey(olc::Key::K4).bPressed) {
+        levelNo = 4;
+      } else if (GetKey(olc::Key::K5).bPressed) {
+        levelNo = 5;
+      } else if (GetKey(olc::Key::K6).bPressed) {
+        levelNo = 6;
+      } else if (GetKey(olc::Key::K7).bPressed) {
+        levelNo = 7;
+      } else if (GetKey(olc::Key::K8).bPressed) {
+        levelNo = 8;
+      } else if (GetKey(olc::Key::K9).bPressed) {
+        levelNo = 9;
+      } else if (GetKey(olc::Key::K0).bPressed) {
+        levelNo = 10;
+      }
+
+      if (GetKey(olc::Key::S).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+        saveLevel();
+      }
+
+      if (GetKey(olc::Key::L).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+        loadLevel();
       }
 
       if (GetKey(olc::Key::OEM_4).bHeld) drawDistance /= 1.01;
@@ -844,21 +881,23 @@ class Olc3d2 : public olc::PixelGameEngine {
       lastMyY = myY;
       lastAngle = angle;
 
-      if (GetKey(olc::Key::W).bHeld) {
-        myX += std::sin(angle) * unit * 2 * frameLength;
-        myY += std::cos(angle) * unit * 2 * frameLength;
-      }
-      if (GetKey(olc::Key::S).bHeld) {
-        myX -= std::sin(angle) * unit * 2 * frameLength;
-        myY -= std::cos(angle) * unit * 2 * frameLength;
-      }
-      if (GetKey(olc::Key::A).bHeld) {
-        myX += std::cos(angle) * unit * 2 * frameLength;
-        myY += -std::sin(angle) * unit * 2 * frameLength;
-      }
-      if (GetKey(olc::Key::D).bHeld) {
-        myX -= std::cos(angle) * unit * 2 * frameLength;
-        myY -= -std::sin(angle) * unit * 2 * frameLength;
+      if (!GetKey(olc::Key::CTRL).bHeld) {
+        if (GetKey(olc::Key::W).bHeld) {
+          myX += std::sin(angle) * unit * 2 * frameLength;
+          myY += std::cos(angle) * unit * 2 * frameLength;
+        }
+        if (GetKey(olc::Key::S).bHeld) {
+          myX -= std::sin(angle) * unit * 2 * frameLength;
+          myY -= std::cos(angle) * unit * 2 * frameLength;
+        }
+        if (GetKey(olc::Key::A).bHeld) {
+          myX += std::cos(angle) * unit * 2 * frameLength;
+          myY += -std::sin(angle) * unit * 2 * frameLength;
+        }
+        if (GetKey(olc::Key::D).bHeld) {
+          myX -= std::cos(angle) * unit * 2 * frameLength;
+          myY -= -std::sin(angle) * unit * 2 * frameLength;
+        }
       }
     }
   }
@@ -1601,6 +1640,9 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Ctrl + G - Generate new maze" << std::endl
                  << "Ctrl + M - Generate empty map" << std::endl
                  << "N - Switch between night and day" << std::endl
+                 << "Ctrl + S - Save level" << std::endl
+                 << "Ctrl + L - Load level" << std::endl
+                 << "1,2,3...0 - Pick save slot, 1-10" << std::endl
                  << "H - Toggle Help (this text!)" << std::endl;
 
     DrawStringDecal({2 * w / 3, 10}, stringStream.str(), olc::WHITE);
