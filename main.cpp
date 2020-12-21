@@ -8,6 +8,7 @@ const float omega = 0.1;
 float drawDistance = 1500;
 float zoom = w / 2;
 bool day = true;
+bool showHelp = true;
 
 const int defaultFloor = 97;
 const int defaultWall = 154;
@@ -671,11 +672,96 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (GetKey(olc::Key::LEFT).bHeld) angle += 2 * frameLength;
       if (GetKey(olc::Key::RIGHT).bHeld) angle -= 2 * frameLength;
 
+      if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
+          cursorY <= mazeHeight * 2) {
+        if (GetMouse(0).bHeld && quad::cursorQuad != nullptr) {
+          int x = quad::cursorQuad->mapX;
+          int y = quad::cursorQuad->mapY;
+          int f = quad::cursorQuad->wallF;
+          int d = quad::cursorQuad->wallD;
+
+          if (quad::cursorQuad->wall) {
+            map[x][y].wall[f][d] = selectedTexture;
+          } else {
+            if (f == 0) {
+              map[x][y].floor = selectedTexture;
+            } else {
+              map[x][y].ceiling = selectedTexture;
+            }
+          }
+
+          quad::cursorQuad->renderable = &texture[selectedTexture];
+
+        } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
+          angle += static_cast<float>(mousePos.x - lastMousePos.x) / 600 *
+                   ((w / 2) / zoom);
+
+        } else if (GetKey(olc::Key::Q).bPressed) {
+          int x = quad::cursorQuad->mapX;
+          int y = quad::cursorQuad->mapY;
+          int f = quad::cursorQuad->wallF;
+          int d = quad::cursorQuad->wallD;
+
+          if (quad::cursorQuad->wall) {
+            selectedTexture = map[x][y].wall[f][d];
+          } else if (f == 0) {
+            selectedTexture = map[x][y].floor;
+          } else {
+            selectedTexture = map[x][y].ceiling;
+          }
+
+        } else if (GetKey(olc::Key::T).bHeld) {
+          setQuadTexture(cursorX, cursorY, selectedTexture, true);
+        } else if (GetKey(olc::Key::K1).bPressed) {
+          // if (map[cursorX][cursorY].type != cellType::wall) {
+          //   map[cursorX][cursorY].type = cellType::wall;
+          //   regenerateQuads();
+          // }
+        } else if (GetKey(olc::Key::K2).bPressed) {
+          // if (map[cursorX][cursorY].type != cellType::corridor) {
+          //   map[cursorX][cursorY].type = cellType::corridor;
+          //   regenerateQuads();
+          // }
+        } else if (GetKey(olc::Key::K3).bPressed) {
+          // if (map[cursorX][cursorY].type != cellType::lowroom) {
+          //   map[cursorX][cursorY].type = cellType::lowroom;
+          //   regenerateQuads();
+          // }
+        } else if (GetKey(olc::Key::K4).bPressed) {
+          // if (map[cursorX][cursorY].type != cellType::highroom) {
+          //   map[cursorX][cursorY].type = cellType::highroom;
+          //   regenerateQuads();
+          // }
+        } else if (GetKey(olc::Key::K5).bPressed) {
+          // if (map[cursorX][cursorY].type != cellType::sky) {
+          //   map[cursorX][cursorY].type = cellType::sky;
+          //   regenerateQuads();
+          // }
+        }
+      }
+
+      if (GetKey(olc::Key::OEM_4).bHeld) drawDistance /= 1.01;
+      if (GetKey(olc::Key::OEM_6).bHeld) drawDistance *= 1.01;
+
+      if (drawDistance < unit) drawDistance = unit;
+      if (drawDistance > unit * mazeWidth * 2)
+        drawDistance = unit * mazeWidth * 2;
+
+      if (GetKey(olc::Key::CTRL).bHeld) {
+        if (GetKey(olc::Key::PGDN).bHeld) pitch += 2 * frameLength;
+        if (GetKey(olc::Key::PGUP).bHeld) pitch -= 2 * frameLength;
+
+      } else {
+        if (GetKey(olc::Key::PGUP).bHeld) myZ -= unit * 2 * frameLength;
+        if (GetKey(olc::Key::PGDN).bHeld) myZ += unit * 2 * frameLength;
+        if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
+      }
+
       if (quad::cursorQuad != nullptr) {
         int x = quad::cursorQuad->mapX;
         int y = quad::cursorQuad->mapY;
 
-        if (GetKey(olc::Key::DOWN).bPressed) {
+        if (GetKey(olc::Key::F).bPressed) {
           switch (map[x][y].type) {
             case cellType::sky:
               map[x][y].type = cellType::highroom;
@@ -697,7 +783,7 @@ class Olc3d2 : public olc::PixelGameEngine {
           quad::cursorQuad = nullptr;
         }
 
-        if (GetKey(olc::Key::UP).bPressed) {
+        if (GetKey(olc::Key::R).bPressed) {
           switch (map[x][y].type) {
             case cellType::highroom:
               map[x][y].type = cellType::sky;
@@ -720,80 +806,6 @@ class Olc3d2 : public olc::PixelGameEngine {
         }
       }
 
-      if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
-          cursorY <= mazeHeight * 2) {
-        if (GetMouse(0).bHeld && quad::cursorQuad != nullptr) {
-          int x = quad::cursorQuad->mapX;
-          int y = quad::cursorQuad->mapY;
-          int f = quad::cursorQuad->wallF;
-          int d = quad::cursorQuad->wallD;
-
-          if (quad::cursorQuad->wall) {
-            map[x][y].wall[f][d] = selectedTexture;
-          } else {
-            if (f == 0) {
-              map[x][y].floor = selectedTexture;
-            } else {
-              map[x][y].ceiling = selectedTexture;
-            }
-          }
-
-          quad::cursorQuad->renderable = &texture[selectedTexture];
-
-        } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
-          int x = quad::cursorQuad->mapX;
-          int y = quad::cursorQuad->mapY;
-          int f = quad::cursorQuad->wallF;
-          int d = quad::cursorQuad->wallD;
-
-          if (quad::cursorQuad->wall) {
-            selectedTexture = map[x][y].wall[f][d];
-          } else if (f == 0) {
-            selectedTexture = map[x][y].floor;
-          } else {
-            selectedTexture = map[x][y].ceiling;
-          }
-
-        } else if (GetKey(olc::Key::T).bHeld) {
-          setQuadTexture(cursorX, cursorY, selectedTexture, true);
-        } else if (GetKey(olc::Key::K1).bPressed) {
-          if (map[cursorX][cursorY].type != cellType::wall) {
-            map[cursorX][cursorY].type = cellType::wall;
-            regenerateQuads();
-          }
-        } else if (GetKey(olc::Key::K2).bPressed) {
-          if (map[cursorX][cursorY].type != cellType::corridor) {
-            map[cursorX][cursorY].type = cellType::corridor;
-            regenerateQuads();
-          }
-        } else if (GetKey(olc::Key::K3).bPressed) {
-          if (map[cursorX][cursorY].type != cellType::lowroom) {
-            map[cursorX][cursorY].type = cellType::lowroom;
-            regenerateQuads();
-          }
-        } else if (GetKey(olc::Key::K4).bPressed) {
-          if (map[cursorX][cursorY].type != cellType::highroom) {
-            map[cursorX][cursorY].type = cellType::highroom;
-            regenerateQuads();
-          }
-        } else if (GetKey(olc::Key::K5).bPressed) {
-          if (map[cursorX][cursorY].type != cellType::sky) {
-            map[cursorX][cursorY].type = cellType::sky;
-            regenerateQuads();
-          }
-        }
-      }
-
-      if (GetKey(olc::Key::OEM_4).bHeld) drawDistance /= 1.01;
-      if (GetKey(olc::Key::OEM_6).bHeld) drawDistance *= 1.01;
-
-      if (drawDistance < unit) drawDistance = unit;
-      if (drawDistance > unit * mazeWidth * 2)
-        drawDistance = unit * mazeWidth * 2;
-
-      if (GetKey(olc::Key::PGDN).bHeld) pitch += 2 * frameLength;
-      if (GetKey(olc::Key::PGUP).bHeld) pitch -= 2 * frameLength;
-
       if (GetKey(olc::Key::HOME).bHeld) {
         pitch = 0;
         zoom = w / 2;
@@ -805,19 +817,23 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (zoom < w / 4) zoom = w / 4;
       if (zoom > w * 5) zoom = w * 5;
 
-      if (GetKey(olc::Key::M).bPressed) {
-        day = false;
-        makeMaze();
-        regenerateQuads();
-      }
-
       if (GetKey(olc::Key::N).bPressed) {
         day = !day;
       }
 
-      if (GetKey(olc::Key::G).bPressed) {
+      if (GetKey(olc::Key::H).bPressed) {
+        showHelp = !showHelp;
+      }
+
+      if (GetKey(olc::Key::M).bPressed && GetKey(olc::Key::CTRL).bHeld) {
         day = true;
         clearMap();
+        regenerateQuads();
+      }
+
+      if (GetKey(olc::Key::G).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+        day = false;
+        makeMaze();
         regenerateQuads();
       }
 
@@ -844,9 +860,6 @@ class Olc3d2 : public olc::PixelGameEngine {
         myX -= std::cos(angle) * unit * 2 * frameLength;
         myY -= -std::sin(angle) * unit * 2 * frameLength;
       }
-      if (GetKey(olc::Key::R).bHeld) myZ -= unit * 2 * frameLength;
-      if (GetKey(olc::Key::F).bHeld) myZ += unit * 2 * frameLength;
-      if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
     }
   }
 
@@ -1403,7 +1416,7 @@ class Olc3d2 : public olc::PixelGameEngine {
               [](quad* a, quad* b) { return a->dSquared > b->dSquared; });
   }
 
-  void showMazeMap() {
+  void renderMazeMap() {
     const int size = 8;
     for (int i = 0; i < mazeWidth * 2 + 1; i++) {
       for (int j = 0; j < mazeHeight * 2 + 1; j++) {
@@ -1432,7 +1445,7 @@ class Olc3d2 : public olc::PixelGameEngine {
         olc::RED);
   }
 
-  void showQuadMap() {
+  void renderQuadMap() {
     for (auto q : quads) {
       if (q.partials.size() > 0) {
         for (auto p : q.partials) {
@@ -1531,28 +1544,25 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (qCount > qMax) qMax = qCount;
 
-    std::ostringstream stringStream;
-    stringStream << "Quads: " << qCount << " (Max: " << qMax
-                 << ") Zoom: " << static_cast<int>(200 * zoom / w)
-                 << "%  Mouse: " << mousePos.x - w / 2 << ", "
-                 << mousePos.y - h / 2 << " Range: " << drawDistance << " | "
-                 << GetFPS() << " FPS";
+    if (showHelp) {
+      std::ostringstream stringStream;
+      stringStream << "Quads: " << qCount << " (Max: " << qMax
+                   << ") | Zoom: " << static_cast<int>(200 * zoom / w)
+                   << "% | Range: " << drawDistance << " | " << GetFPS()
+                   << " FPS" << std::endl;
 
-    DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
+      if (quad::cursorQuad != nullptr) {
+        stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
+                     << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
+                     << ", Level: " << quad::cursorQuad->wallF
+                     << ", Direction: " << quad::cursorQuad->wallD;
+      }
 
-    if (quad::cursorQuad != nullptr) {
-      stringStream.str("");
-      stringStream << cursorX << ", " << cursorY << ": "
-                   << quad::cursorQuad->mapX << ", " << quad::cursorQuad->mapY
-                   << " [" << quad::cursorQuad->wall << "] "
-                   << quad::cursorQuad->wallF << " | "
-                   << quad::cursorQuad->wallD;
-
-      DrawStringDecal({10, 30}, stringStream.str(), olc::WHITE);
+      DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
     }
   }
 
-  void showTileSelector() {
+  void renderTileSelector() {
     int iMax = static_cast<int>(w / (tileSize + 10));
     int jMax = static_cast<int>(176 / iMax) + 1;
     for (int j = 0; j < jMax; j++) {
@@ -1565,6 +1575,35 @@ class Olc3d2 : public olc::PixelGameEngine {
                   k == selectedTexture ? olc::WHITE : olc::GREY);
       }
     }
+  }
+
+  void renderHelp() {
+    std::ostringstream stringStream;
+    stringStream << "W/S/A/D - Move" << std::endl
+                 << "Left Click - Apply Texture (One surface)" << std::endl
+                 << "T - Apply Texture (Walls of whole column)" << std::endl
+                 << "Right Click (Drag) or Left/Right - Turn" << std::endl
+                 << "Middle Click (Hold) or Shift or MouseWheel" << std::endl
+                 << "    - Choose Texture" << std::endl
+                 << "Q - Pick Texture" << std::endl
+                 << "-/+ - Zoom" << std::endl
+                 << "[/] - Render Distance" << std::endl
+                 << "R/F - Raise / Lower Ceiling" << std::endl
+                 << "PgUp/PgDn - Fly Up / Down" << std::endl
+                 << "End - Reset Height" << std::endl
+                 << "Ctrl + PgUp/PgDn - Look up / down (Experimental)"
+                 << std::endl
+                 << "Home - Reset View (Zoom, Render Distance, Pitch)"
+                 << std::endl
+                 << "Tab - Show map" << std::endl
+                 << "Tab - Show map" << std::endl
+                 << "Ctrl + \\ - Show rendering details" << std::endl
+                 << "Ctrl + G - Generate new maze" << std::endl
+                 << "Ctrl + M - Generate empty map" << std::endl
+                 << "N - Switch between night and day" << std::endl
+                 << "H - Toggle Help (this text!)" << std::endl;
+
+    DrawStringDecal({2 * w / 3, 10}, stringStream.str(), olc::WHITE);
   }
 
   bool OnUserUpdate(float fElapsedTime) override {
@@ -1585,18 +1624,19 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
 
     if (GetKey(olc::Key::TAB).bHeld) {
-      showMazeMap();
-    } else if (GetKey(olc::Key::OEM_5).bHeld) {
-      showQuadMap();
+      renderMazeMap();
+    } else if (GetKey(olc::Key::CTRL).bHeld && GetKey(olc::Key::OEM_5).bHeld) {
+      renderQuadMap();
     } else {
       sortQuads();
       renderQuads();
       if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) {
-        showTileSelector();
+        renderTileSelector();
       } else {
         DrawDecal({w - (tileSize + 10), 10}, texture[selectedTexture].decal,
                   {1, 1});
       }
+      if (showHelp) renderHelp();
     }
 
     return true;
