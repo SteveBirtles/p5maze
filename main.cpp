@@ -168,7 +168,7 @@ const int MAX_WIDTH = 100;
 const int MAX_HEIGHT = 100;
 int mazeWidth = 40;
 int mazeHeight = 40;
-float drawDistance = 15 * unit;
+float drawDistance = 30 * unit;
 
 mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
 kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
@@ -457,8 +457,9 @@ void makeMaze() {
   for (int i = -mazeWidth; i <= mazeWidth; i++) {
     for (int j = -mazeHeight; j <= mazeHeight; j++) {
       map[i + mazeWidth][j + mazeHeight].type =
-          (i + mazeWidth) % 2 == 1 && (j + mazeHeight) % 2 == 1 ? CORRIDOR
-                                                                : WALL;
+          (i + mazeWidth) % 2 == 1 && (j + mazeHeight) % 2 == 1
+              ? SKY
+              : SKY_SINGLE_BLOCK;
       map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
 
       for (int f = 0; f < 3; f++) {
@@ -473,7 +474,7 @@ void makeMaze() {
   for (int i = 0; i < mazeWidth; i++) {
     for (int j = 0; j < mazeHeight; j++) {
       if (kruskalMaze[i][j].right) {
-        map[i * 2 + 2][j * 2 + 1].type = CORRIDOR;
+        map[i * 2 + 2][j * 2 + 1].type = SKY;
         map[i * 2 + 2][j * 2 + 1].floor = defaultFloor;
 
         for (int f = 0; f < 3; f++) {
@@ -484,7 +485,7 @@ void makeMaze() {
         map[i * 2 + 2][j * 2 + 1].ceiling = defaultCeiling;
       }
       if (kruskalMaze[i][j].down) {
-        map[i * 2 + 1][j * 2 + 2].type = CORRIDOR;
+        map[i * 2 + 1][j * 2 + 2].type = SKY;
         map[i * 2 + 1][j * 2 + 2].floor = defaultFloor;
 
         for (int f = 0; f < 3; f++) {
@@ -504,7 +505,7 @@ void makeMaze() {
     int y = std::rand() % (mazeWidth * 2 - rh);
     for (int i = x; i <= x + rw; i++) {
       for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = LOW_ROOM;
+        map[i][j].type = SKY_DOUBLE_BLOCK;
         map[i][j].floor = defaultFloor;
 
         for (int f = 0; f < 3; f++) {
@@ -524,46 +525,7 @@ void makeMaze() {
     int y = std::rand() % (mazeWidth * 2 - rh);
     for (int i = x; i <= x + rw; i++) {
       for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = HIGH_ROOM;
-        map[i][j].floor = defaultFloor;
-        for (int f = 0; f < 3; f++) {
-          for (int d = 0; d < 4; d++) {
-            map[i][j].wall[f][d] = defaultWall;
-          }
-        }
-        map[i][j].ceiling = defaultCeiling;
-      }
-    }
-  }
-
-  for (int r = 0; r < 10; r++) {
-    int rw = std::rand() % 10 + 5;
-    int rh = std::rand() % 10 + 5;
-    int x = std::rand() % (mazeWidth * 2 - rw);
-    int y = std::rand() % (mazeWidth * 2 - rh);
-    for (int i = x; i <= x + rw; i++) {
-      for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = HIGH_ROOM_SINGLE_BLOCK;
-        map[i][j].floor = defaultFloor;
-
-        for (int f = 0; f < 3; f++) {
-          for (int d = 0; d < 4; d++) {
-            map[i][j].wall[f][d] = defaultWall;
-          }
-        }
-        map[i][j].ceiling = defaultCeiling;
-      }
-    }
-  }
-
-  for (int r = 0; r < 10; r++) {
-    int rw = std::rand() % 10 + 5;
-    int rh = std::rand() % 10 + 5;
-    int x = std::rand() % (mazeWidth * 2 - rw);
-    int y = std::rand() % (mazeWidth * 2 - rh);
-    for (int i = x; i <= x + rw; i++) {
-      for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = HIGH_ROOM_DOUBLE_BLOCK;
+        map[i][j].type = SKY;
         map[i][j].floor = defaultFloor;
 
         for (int f = 0; f < 3; f++) {
@@ -685,6 +647,20 @@ class Olc3d2 : public olc::PixelGameEngine {
   int cursorX, cursorY;
 
   uint8_t selectedTexture = 1;
+  int selectedBlock = 0;
+
+  uint8_t selectedBlockTypes[12]{SKY,
+                                 SKY_SINGLE_BLOCK,
+                                 SKY_FLOATING_BLOCK,
+                                 SKY_DOUBLE_BLOCK,
+                                 LOW_ROOM,
+                                 LOW_ROOM_SINGLE_BLOCK,
+                                 CORRIDOR,
+                                 WALL,
+                                 HIGH_ROOM,
+                                 HIGH_ROOM_SINGLE_BLOCK,
+                                 HIGH_ROOM_FLOATING_BLOCK,
+                                 HIGH_ROOM_DOUBLE_BLOCK};
 
   int qMax = 0;
 
@@ -726,8 +702,8 @@ class Olc3d2 : public olc::PixelGameEngine {
     } else {
       int mouseWheel = GetMouseWheel();
 
-      if (mouseWheel < 0) selectedTexture = (selectedTexture + 1) % 176;
-      if (mouseWheel > 0) selectedTexture = (selectedTexture + 175) % 176;
+      if (mouseWheel < 0) selectedBlock = (selectedBlock + 1) % 12;
+      if (mouseWheel > 0) selectedBlock = (selectedBlock + 11) % 12;
 
       if (GetKey(olc::Key::LEFT).bHeld) angle += 2 * frameLength;
       if (GetKey(olc::Key::RIGHT).bHeld) angle -= 2 * frameLength;
@@ -843,23 +819,54 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::F).bPressed) {
           switch (map[x][y].type) {
-            case SKY:
-              map[x][y].type = HIGH_ROOM;
-              regenerateQuads();
+            case SKY:  // 0
+              map[x][y].type = SKY_SINGLE_BLOCK;
               break;
-            case HIGH_ROOM:
+            case SKY_SINGLE_BLOCK:  // 1
+              map[x][y].type = SKY_FLOATING_BLOCK;
+              break;
+            case SKY_FLOATING_BLOCK:  // 2
+              map[x][y].type = SKY_DOUBLE_BLOCK;
+              break;
+            case SKY_DOUBLE_BLOCK:  // 3
               map[x][y].type = LOW_ROOM;
-              regenerateQuads();
               break;
-            case LOW_ROOM:
+            case LOW_ROOM:  // 4
+              map[x][y].type = LOW_ROOM_SINGLE_BLOCK;
+              break;
+            case LOW_ROOM_SINGLE_BLOCK:  // 5
               map[x][y].type = CORRIDOR;
-              regenerateQuads();
               break;
-            case CORRIDOR:
+            case CORRIDOR:  // 6
               map[x][y].type = WALL;
-              regenerateQuads();
+              break;
+            case WALL:  // 7
+              map[x][y].type = HIGH_ROOM;
+              break;
+            case HIGH_ROOM:  // 8
+              map[x][y].type = HIGH_ROOM_SINGLE_BLOCK;
+              break;
+            case HIGH_ROOM_SINGLE_BLOCK:  // 9
+              map[x][y].type = HIGH_ROOM_FLOATING_BLOCK;
+              break;
+            case HIGH_ROOM_FLOATING_BLOCK:  // 10
+              map[x][y].type = HIGH_ROOM_DOUBLE_BLOCK;
+              break;
+            case HIGH_ROOM_DOUBLE_BLOCK:  // 11
+              map[x][y].type = SKY;
               break;
           }
+          regenerateQuads();
+          if (autoTexture) {
+            setQuadTexture(x, y, selectedTexture, true);
+            setQuadTexture(x, y, selectedTexture, false, true);
+          }
+          quad::cursorQuad = nullptr;
+        }
+
+        if (GetKey(olc::Key::SPACE).bPressed) {
+          map[x][y].type = selectedBlock;
+          regenerateQuads();
           if (autoTexture) {
             setQuadTexture(x, y, selectedTexture, true);
             setQuadTexture(x, y, selectedTexture, false, true);
@@ -869,23 +876,45 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::R).bPressed) {
           switch (map[x][y].type) {
-            case HIGH_ROOM:
+            case SKY:  // 0
+              map[x][y].type = HIGH_ROOM_DOUBLE_BLOCK;
+              break;
+            case SKY_SINGLE_BLOCK:  // 1
               map[x][y].type = SKY;
-              regenerateQuads();
               break;
-            case LOW_ROOM:
-              map[x][y].type = HIGH_ROOM;
-              regenerateQuads();
+            case SKY_FLOATING_BLOCK:  // 2
+              map[x][y].type = SKY_SINGLE_BLOCK;
               break;
-            case CORRIDOR:
+            case SKY_DOUBLE_BLOCK:  // 3
+              map[x][y].type = SKY_FLOATING_BLOCK;
+              break;
+            case LOW_ROOM:  // 4
+              map[x][y].type = SKY_DOUBLE_BLOCK;
+              break;
+            case LOW_ROOM_SINGLE_BLOCK:  // 5
               map[x][y].type = LOW_ROOM;
-              regenerateQuads();
               break;
-            case WALL:
+            case CORRIDOR:  // 6
+              map[x][y].type = LOW_ROOM_SINGLE_BLOCK;
+              break;
+            case WALL:  // 7
               map[x][y].type = CORRIDOR;
-              regenerateQuads();
+              break;
+            case HIGH_ROOM:  // 8
+              map[x][y].type = WALL;
+              break;
+            case HIGH_ROOM_SINGLE_BLOCK:  // 9
+              map[x][y].type = HIGH_ROOM;
+              break;
+            case HIGH_ROOM_FLOATING_BLOCK:  // 10
+              map[x][y].type = HIGH_ROOM_SINGLE_BLOCK;
+              break;
+            case HIGH_ROOM_DOUBLE_BLOCK:  // 11
+              map[x][y].type = HIGH_ROOM_FLOATING_BLOCK;
               break;
           }
+
+          regenerateQuads();
           if (autoTexture) {
             setQuadTexture(x, y, selectedTexture, true);
             setQuadTexture(x, y, selectedTexture, false, true);
@@ -1505,14 +1534,18 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (fade < 0) continue;
 
       if (cursorX == quad.mapX && cursorY == quad.mapY) {
-        quad.colour = olc::Pixel(255, 255, 255);
+        if (day) {
+          quad.colour = olc::Pixel(128, 128, 255);
+        } else {
+          quad.colour = olc::Pixel(255, 255, 128);
+        }
       } else {
         if (day) {
           int alpha = 255;
           if (fade < 0.25) {
             alpha = static_cast<int>(255.0f * 4 * fade);
           }
-          int rgb = static_cast<int>(64 + 128 * std::pow(fade, 2));
+          int rgb = static_cast<int>(128 + 128 * std::pow(fade, 2));
           quad.colour = olc::Pixel(rgb, rgb, rgb, alpha);
         } else {
           int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
@@ -1665,13 +1698,17 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (showHelp) {
       std::ostringstream stringStream;
+
+      stringStream << "./maps/level" << levelNo << ".dat" << std::endl;
+      stringStream << std::endl;
+
       stringStream << "Quads: " << qCount << " (Max: " << qMax << ")"
                    << std::endl
-                   << " X: " << myX << " Y: " << myY << " Z: " << myZ
-                   << std::endl
-                   << " | Zoom: " << static_cast<int>(200 * zoom / w)
+                   << "Zoom: " << static_cast<int>(200 * zoom / w)
                    << "% | Range: " << drawDistance << " | " << GetFPS()
-                   << " FPS" << std::endl;
+                   << " FPS" << std::endl
+                   << "X: " << myX << " Y: " << myY << " Z: " << myZ
+                   << std::endl;
 
       if (quad::cursorQuad != nullptr) {
         stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
@@ -1682,7 +1719,19 @@ class Olc3d2 : public olc::PixelGameEngine {
                      << (noClip ? " [Noclip]" : "") << std::endl;
       }
 
-      stringStream << "./maps/level" << levelNo << ".dat";
+      stringStream << std::endl;
+      stringStream << "        _ _ _ _ _ _ _ _" << std::endl;
+      stringStream << "    _ _ # # # #     _ _" << std::endl;
+      stringStream << "    # #   _ # #   _ # #" << std::endl;
+      stringStream << "_ # _ # _ # _ # _ # _ #" << std::endl << std::endl;
+
+      for (int i = 0; i < 12; i++) {
+        if (i == selectedBlock) {
+          stringStream << "^ ";
+        } else {
+          stringStream << "  ";
+        }
+      }
 
       DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
     }
@@ -1709,9 +1758,9 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Left Click - Apply Texture (One surface)" << std::endl
                  << "T - Apply Texture (whole column, exlc. floor)" << std::endl
                  << "Right Click (Drag) or Left/Right - Turn" << std::endl
-                 << "Middle Click (Hold) or Shift or MouseWheel" << std::endl
-                 << "    - Choose Texture" << std::endl
+                 << "Middle Click (Hold) or Shift - Choose Texture" << std::endl
                  << "Q - Pick Texture" << std::endl
+                 << "Mouse Wheel - Pick Block Type" << std::endl
                  << "-/+ - Zoom" << std::endl
                  << "[/] - Render Distance" << std::endl
                  << "R/F - Raise / Lower Ceiling" << std::endl
