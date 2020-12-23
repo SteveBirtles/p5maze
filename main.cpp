@@ -107,14 +107,14 @@ struct quad {
   olc::Pixel colour;
   int mapX;
   int mapY;
-  int wallF;
-  int wallD;
+  int level;
+  int direction;
   quad() {
     mapX = -1;
     mapY = -1;
   };
   quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall, int _mapX,
-       int _mapY, int textureNo = 7, int _wallF = 0, int _wallD = -1) {
+       int _mapY, int textureNo = 7, int _level = 0, int _direction = -1) {
     vertices[0] = _p0;
     vertices[1] = _p1;
     vertices[2] = _p2;
@@ -126,8 +126,8 @@ struct quad {
     mapX = _mapX;
     mapY = _mapY;
     wall = _wall;
-    wallF = _wallF;
-    wallD = _wallD;
+    level = _level;
+    direction = _direction;
     renderable = &texture[textureNo];
   }
   ~quad() {
@@ -177,13 +177,15 @@ mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
 kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
 
 struct action {
+  int frame;
   int x;
   int y;
   mapCell cell;
-  action(mapCell _cell, int _x, int _y) {
+  action(mapCell _cell, int _x, int _y, int _frame) {
     x = _x;
     y = _y;
     cell = _cell;
+    frame = _frame;
   }
 };
 
@@ -231,12 +233,15 @@ int clearQuads(int x, int y) {
   return clearCount;
 }
 
-int setQuadTexture(int x, int y, uint8_t id, bool wall) {
+int setQuadTexture(int x, int y, uint8_t id, bool wall, bool floor = false) {
   if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeWidth) return 0;
   int setCount = 0;
   for (int i = 0; i < quads.size(); i++) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
       if (wall == quads[i].wall) {
+        if (!wall &&
+            (floor && quads[i].level != 0 || !floor && quads[i].level == 0))
+          continue;
         quads[i].renderable = &texture[id];
         setCount++;
       }
@@ -251,6 +256,8 @@ int setQuadTexture(int x, int y, uint8_t id, bool wall) {
     }
   } else {
     for (int f = 0; f < 4; f++) {
+      if (floor && f > 0) break;
+      if (!floor && f == 0) continue;
       map[x][y].flat[f] = id;
     }
   }
@@ -538,6 +545,8 @@ class Olc3d2 : public olc::PixelGameEngine {
  public:
   Olc3d2() { sAppName = "Olc3d2"; }
 
+  long frame = 0;
+
   float zoom = w / 2;
   bool day = true;
   bool showHelp = true;
@@ -545,6 +554,12 @@ class Olc3d2 : public olc::PixelGameEngine {
   bool autoTexture = false;
   int levelNo = 1;
   bool exitSignal = false;
+
+  int selectionStartX;
+  int selectionStartY;
+  int selectionEndX;
+  int selectionEndY;
+  bool selectionLive = false;
 
   void saveLevel() {
     std::ostringstream filename;
@@ -611,7 +626,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       std::cout << "Error occurred loading level." << std::endl;
       return;
     }
-    
+
     regenerateQuads();
 
     std::cout << "Level loaded: " << filename.str() << std::endl;
@@ -708,18 +723,18 @@ class Olc3d2 : public olc::PixelGameEngine {
         if (GetMouse(0).bHeld && quad::cursorQuad != nullptr) {
           int x = quad::cursorQuad->mapX;
           int y = quad::cursorQuad->mapY;
-          int f = quad::cursorQuad->wallF;
-          int d = quad::cursorQuad->wallD;
+          int f = quad::cursorQuad->level;
+          int d = quad::cursorQuad->direction;
 
           uint8_t candidateTexture;
           if (quad::cursorQuad->wall) {
             candidateTexture = map[x][y].wall[f][d];
-          } else if (f == 0) {
+          } else {
             candidateTexture = map[x][y].flat[f];
           }
 
           if (candidateTexture != selectedTexture) {
-            undoBuffer.push_back(action(map[x][y], x, y));
+            undoBuffer.push_back(action(map[x][y], x, y, frame));
 
             if (quad::cursorQuad->wall) {
               map[x][y].wall[f][d] = selectedTexture;
@@ -731,14 +746,14 @@ class Olc3d2 : public olc::PixelGameEngine {
           }
 
         } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
-          angle += static_cast<float>(mousePos.x - lastMousePos.x) / 600 *
+          angle -= static_cast<float>(mousePos.x - lastMousePos.x) / (w / 4) *
                    ((w / 2) / zoom);
 
         } else if (GetKey(olc::Key::Q).bPressed) {
           int x = quad::cursorQuad->mapX;
           int y = quad::cursorQuad->mapY;
-          int f = quad::cursorQuad->wallF;
-          int d = quad::cursorQuad->wallD;
+          int f = quad::cursorQuad->level;
+          int d = quad::cursorQuad->direction;
 
           if (quad::cursorQuad->wall) {
             selectedTexture = map[x][y].wall[f][d];
@@ -746,14 +761,64 @@ class Olc3d2 : public olc::PixelGameEngine {
             selectedTexture = map[x][y].flat[f];
           }
 
-        } else if (GetKey(olc::Key::T).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
-          int x = quad::cursorQuad->mapX;
-          int y = quad::cursorQuad->mapY;
-          undoBuffer.push_back(action(map[x][y], x, y));
+        } else if ((GetKey(olc::Key::T).bPressed ||
+                    GetKey(olc::Key::F).bPressed ||
+                    GetKey(olc::Key::C).bPressed) &&
+                   !GetKey(olc::Key::CTRL).bHeld) {
+          if (selectionLive) {
+            int x1 = selectionStartX < selectionEndX ? selectionStartX
+                                                     : selectionEndX;
+            int y1 = selectionStartY < selectionEndY ? selectionStartY
+                                                     : selectionEndY;
+            int x2 = selectionStartX > selectionEndX ? selectionStartX
+                                                     : selectionEndX;
+            int y2 = selectionStartY > selectionEndY ? selectionStartY
+                                                     : selectionEndY;
 
-          setQuadTexture(cursorX, cursorY, selectedTexture, true);
-          setQuadTexture(cursorX, cursorY, selectedTexture, false);
+            for (int i = x1; i <= x2; i++) {
+              for (int j = y1; j <= y2; j++) {
+                undoBuffer.push_back(action(map[i][j], i, j, frame));
+                if (GetKey(olc::Key::T).bPressed)
+                  setQuadTexture(i, j, selectedTexture, true);
+                if (GetKey(olc::Key::F).bPressed)
+                  setQuadTexture(i, j, selectedTexture, false, true);
+                if (GetKey(olc::Key::C).bPressed)
+                  setQuadTexture(i, j, selectedTexture, false);
+              }
+            }
+
+            selectionLive = false;
+
+          } else {
+            int x = quad::cursorQuad->mapX;
+            int y = quad::cursorQuad->mapY;
+            undoBuffer.push_back(action(map[x][y], x, y, frame));
+
+            if (GetKey(olc::Key::T).bPressed)
+              setQuadTexture(x, y, selectedTexture, true);
+            if (GetKey(olc::Key::F).bPressed)
+              setQuadTexture(x, y, selectedTexture, false, true);
+            if (GetKey(olc::Key::C).bPressed)
+              setQuadTexture(x, y, selectedTexture, false);
+          }
         }
+      }
+
+      if (GetKey(olc::Key::ESCAPE).bPressed) {
+        selectionLive = false;
+      }
+
+      if (GetKey(olc::Key::SHIFT).bPressed && quad::cursorQuad != nullptr) {
+        selectionStartX = quad::cursorQuad->mapX;
+        selectionStartY = quad::cursorQuad->mapY;
+        selectionEndX = quad::cursorQuad->mapX;
+        selectionEndY = quad::cursorQuad->mapY;
+        selectionLive = true;
+      }
+
+      if (GetKey(olc::Key::SHIFT).bHeld && quad::cursorQuad != nullptr) {
+        selectionEndX = quad::cursorQuad->mapX;
+        selectionEndY = quad::cursorQuad->mapY;
       }
 
       if (GetKey(olc::Key::CTRL).bHeld) {
@@ -781,9 +846,14 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::Z).bPressed && undoBuffer.size() > 0) {
           action u = undoBuffer.back();
-          map[u.x][u.y] = u.cell;
+          int f = u.frame;
+          while (u.frame == f) {
+            map[u.x][u.y] = u.cell;
+            undoBuffer.pop_back();
+            if (undoBuffer.size() == 0) break;
+            u = undoBuffer.back();
+          }
           regenerateQuads();
-          undoBuffer.pop_back();
         }
 
         if (GetKey(olc::Key::C).bPressed) {
@@ -804,7 +874,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::L).bPressed) {
           undoBuffer.clear();
-          loadLevel();          
+          loadLevel();
         }
 
         if (GetKey(olc::Key::M).bPressed) {
@@ -876,13 +946,41 @@ class Olc3d2 : public olc::PixelGameEngine {
         int y = quad::cursorQuad->mapY;
 
         if (GetKey(olc::Key::SPACE).bPressed) {
-          undoBuffer.push_back(action(map[x][y], x, y));
+          if (selectionLive) {
+            int x1 = selectionStartX < selectionEndX ? selectionStartX
+                                                     : selectionEndX;
+            int y1 = selectionStartY < selectionEndY ? selectionStartY
+                                                     : selectionEndY;
+            int x2 = selectionStartX > selectionEndX ? selectionStartX
+                                                     : selectionEndX;
+            int y2 = selectionStartY > selectionEndY ? selectionStartY
+                                                     : selectionEndY;
 
-          map[x][y].type = selectedBlockTypes[selectedBlock];
-          regenerateQuads();
-          if (autoTexture) {
-            setQuadTexture(x, y, selectedTexture, true);
-            setQuadTexture(x, y, selectedTexture, false);
+            for (int i = x1; i <= x2; i++) {
+              for (int j = y1; j <= y2; j++) {
+                undoBuffer.push_back(action(map[i][j], i, j, frame));
+                map[i][j].type = selectedBlockTypes[selectedBlock];
+                if (autoTexture) {
+                  setQuadTexture(i, i, selectedTexture, true);
+                  setQuadTexture(j, j, selectedTexture, false);
+                  setQuadTexture(j, j, selectedTexture, false, true);
+                }
+              }
+            }
+
+            regenerateQuads();
+
+            selectionLive = false;
+
+          } else {
+            undoBuffer.push_back(action(map[x][y], x, y, frame));
+            map[x][y].type = selectedBlockTypes[selectedBlock];
+            regenerateQuads();
+            if (autoTexture) {
+              setQuadTexture(x, y, selectedTexture, true);
+              setQuadTexture(x, y, selectedTexture, false);
+              setQuadTexture(x, y, selectedTexture, false, true);
+            }
           }
           quad::cursorQuad = nullptr;
         }
@@ -1488,7 +1586,19 @@ class Olc3d2 : public olc::PixelGameEngine {
       float fade = 1 - std::sqrt(quad.dSquared) / drawDistance;
       if (fade < 0) continue;
 
-      if (cursorX == quad.mapX && cursorY == quad.mapY) {
+      int x1 =
+          selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
+      int y1 =
+          selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
+      int x2 =
+          selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
+      int y2 =
+          selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
+
+      if (selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
+          quad.mapX <= x2 && quad.mapY <= y2) {
+        quad.colour = olc::Pixel(64, 255, 255);
+      } else if (cursorX == quad.mapX && cursorY == quad.mapY) {
         if (day) {
           quad.colour = olc::Pixel(128, 128, 255);
         } else {
@@ -1593,8 +1703,8 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (quad::cursorQuad != nullptr) {
       stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
                    << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
-                   << ", Level: " << quad::cursorQuad->wallF
-                   << ", Direction: " << quad::cursorQuad->wallD
+                   << ", Level: " << quad::cursorQuad->level
+                   << ", Direction: " << quad::cursorQuad->direction
                    << (autoTexture ? " [Auto]" : "")
                    << (noClip ? " [Noclip]" : "") << std::endl;
     }
@@ -1636,9 +1746,11 @@ class Olc3d2 : public olc::PixelGameEngine {
     std::ostringstream stringStream;
     stringStream << "W/S/A/D - Move" << std::endl
                  << "Left Click - Apply Texture (One surface)" << std::endl
-                 << "T - Apply Texture (whole column, exlc. floor)" << std::endl
                  << "Right Click (Drag) or Left/Right - Turn" << std::endl
                  << "Middle Click (Hold) or \\ - Choose Texture" << std::endl
+                 << "T - Apply Texture (walls)" << std::endl
+                 << "F - Apply Texture (floor)" << std::endl
+                 << "C - Apply Texture (ceiling)" << std::endl
                  << "Q - Pick Texture" << std::endl
                  << "Ctrl + 1,2,3...-,= or Mouse Wheel - Pick Block Type"
                  << std::endl
@@ -1665,6 +1777,8 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   bool OnUserUpdate(float fElapsedTime) override {
+    frame++;
+
     handleInputs(fElapsedTime);
 
     updateMatrix();
