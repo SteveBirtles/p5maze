@@ -5,30 +5,17 @@
 
 const int w = 1280;
 const int h = 1024;
-const int tileSize = 64;
-const float omega = 0.1;
 
-const uint8_t defaultFloor = 97;
-const uint8_t defaultWall = 154;
-const uint8_t defaultCeiling = 102;
+const int TILE_SIZE = 64;
+const float OMEGA = 0.1;
+
+const uint8_t DEFAULT_FLAT = 97;
+const uint8_t DEFAULT_WALL = 154;
 
 const uint8_t CEILING_BIT = 0b10000;
 const uint8_t HIGH_BIT = 0b01000;
 const uint8_t LOW_BIT = 0b00100;
 const uint8_t WALL_BIT = 0b00010;
-
-// 0  SKY
-// 1  SKY_SINGLE_BLOCK
-// 2  SKY_FLOATING_BLOCK
-// 3  SKY_DOUBLE_BLOCK
-// 4  LOW_ROOM
-// 5  LOW_ROOM_SINGLE_BLOCK
-// 6  CORRIDOR
-// 7  WALL
-// 8  HIGH_ROOM
-// 9  HIGH_ROOM_SINGLE_BLOCK
-// 10 HIGH_ROOM_FLOATING_BLOCK
-// 11 HIGH_ROOM_DOUBLE_BLOCK
 
 const uint8_t SKY = 0b00001;
 const uint8_t SKY_SINGLE_BLOCK = 0b00011;
@@ -42,6 +29,10 @@ const uint8_t HIGH_ROOM = 0b10001;
 const uint8_t HIGH_ROOM_SINGLE_BLOCK = 0b10011;
 const uint8_t HIGH_ROOM_FLOATING_BLOCK = 0b10101;
 const uint8_t HIGH_ROOM_DOUBLE_BLOCK = 0b10111;
+
+const uint8_t GENERATOR_WALL = WALL;
+const uint8_t GENERATOR_PATH = CORRIDOR;
+const uint8_t GENERATOR_ROOM = HIGH_ROOM;
 
 struct Renderable {
   Renderable() {}
@@ -130,8 +121,8 @@ struct quad {
     vertices[3] = _p3;
     sourcePos.x = 0;
     sourcePos.y = 0;
-    sourceSize.x = tileSize;
-    sourceSize.y = tileSize;
+    sourceSize.x = TILE_SIZE;
+    sourceSize.y = TILE_SIZE;
     mapX = _mapX;
     mapY = _mapY;
     wall = _wall;
@@ -153,20 +144,19 @@ std::vector<quad*> sortedQuads;
 
 struct mapCell {
   uint8_t type;
-  uint8_t floor;
-  uint8_t ceiling;
+  uint8_t flat[4];
   uint8_t wall[3][4];
   mapCell() { type = SKY; }
-  mapCell(uint8_t _type, uint8_t _floor, uint8_t _wall[3][4],
-          uint8_t _ceiling) {
+  mapCell(uint8_t _type, uint8_t _flat[4], uint8_t _wall[3][4]) {
     type = _type;
-    floor = _floor;
+    for (int f = 0; f < 4; f++) {
+      flat[f] = _flat[f];
+    }
     for (int f = 0; f < 3; f++) {
       for (int d = 0; d < 4; d++) {
         wall[f][d] = _wall[f][d];
       }
     }
-    ceiling = _ceiling;
   }
 };
 
@@ -186,6 +176,19 @@ float drawDistance = 30 * unit;
 mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
 kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
 
+struct action {
+  int x;
+  int y;
+  mapCell cell;
+  action(mapCell _cell, int _x, int _y) {
+    x = _x;
+    y = _y;
+    cell = _cell;
+  }
+};
+
+std::vector<action> undoBuffer;
+
 void clearMap() {
   for (int i = -mazeWidth; i <= mazeWidth; i++) {
     for (int j = -mazeHeight; j <= mazeHeight; j++) {
@@ -194,20 +197,22 @@ void clearMap() {
         map[i + mazeWidth][j + mazeHeight].type = WALL;
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
-            map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
           }
         }
-        map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
-        map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
+        for (int f = 0; f < 4; f++) {
+          map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
+        }
       } else {
         map[i + mazeWidth][j + mazeHeight].type = SKY;
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
-            map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
           }
         }
-        map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
-        map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
+        for (int f = 0; f < 4; f++) {
+          map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
+        }
       }
     }
   }
@@ -226,15 +231,12 @@ int clearQuads(int x, int y) {
   return clearCount;
 }
 
-int setQuadTexture(int x, int y, uint8_t id, bool wall, bool ceiling = false) {
+int setQuadTexture(int x, int y, uint8_t id, bool wall) {
   if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeWidth) return 0;
   int setCount = 0;
   for (int i = 0; i < quads.size(); i++) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
-      if (wall && quads[i].wall ||
-          !wall && !quads[i].wall &&
-              (!ceiling && quads[i].vertices[0].z > unit / 2 ||
-               ceiling && quads[i].vertices[0].z < unit / 2)) {
+      if (wall == quads[i].wall) {
         quads[i].renderable = &texture[id];
         setCount++;
       }
@@ -247,10 +249,10 @@ int setQuadTexture(int x, int y, uint8_t id, bool wall, bool ceiling = false) {
         map[x][y].wall[f][d] = id;
       }
     }
-  } else if (ceiling) {
-    map[x][y].ceiling = id;
-  } else if (ceiling) {
-    map[x][y].floor = id;
+  } else {
+    for (int f = 0; f < 4; f++) {
+      map[x][y].flat[f] = id;
+    }
   }
 
   return setCount;
@@ -276,7 +278,7 @@ void regenerateQuads() {
             quad(vertex(x1, y1, -unit * 2, -1), vertex(x2, y2, -unit * 2, -1),
                  vertex(x3, y3, -unit * 2, -1), vertex(x4, y4, -unit * 2, -1),
                  false, i + mazeWidth, j + mazeHeight,
-                 map[i + mazeWidth][j + mazeHeight].floor, 3));
+                 map[i + mazeWidth][j + mazeHeight].flat[3], 3));
       }
 
       if (map[i + mazeWidth][j + mazeHeight].type & LOW_BIT &&
@@ -286,7 +288,7 @@ void regenerateQuads() {
             quad(vertex(x1, y1, -unit, -1), vertex(x2, y2, -unit, -1),
                  vertex(x3, y3, -unit, -1), vertex(x4, y4, -unit, -1), false,
                  i + mazeWidth, j + mazeHeight,
-                 map[i + mazeWidth][j + mazeHeight].floor, 3));
+                 map[i + mazeWidth][j + mazeHeight].flat[2], 2));
       }
 
       if (map[i + mazeWidth][j + mazeHeight].type & WALL_BIT &&
@@ -295,7 +297,7 @@ void regenerateQuads() {
         quads.push_back(quad(vertex(x1, y1, 0, -1), vertex(x2, y2, 0, -1),
                              vertex(x3, y3, 0, -1), vertex(x4, y4, 0, -1),
                              false, i + mazeWidth, j + mazeHeight,
-                             map[i + mazeWidth][j + mazeHeight].floor, 3));
+                             map[i + mazeWidth][j + mazeHeight].flat[1], 1));
       }
 
       if (!(map[i + mazeWidth][j + mazeHeight].type &
@@ -303,7 +305,7 @@ void regenerateQuads() {
         quads.push_back(quad(vertex(x1, y1, unit, -1), vertex(x2, y2, unit, -1),
                              vertex(x3, y3, unit, -1), vertex(x4, y4, unit, -1),
                              false, i + mazeWidth, j + mazeHeight,
-                             map[i + mazeWidth][j + mazeHeight].floor, 0));
+                             map[i + mazeWidth][j + mazeHeight].flat[0], 0));
       }
 
       if (map[i + mazeWidth][j + mazeHeight].type & LOW_BIT &&
@@ -312,7 +314,7 @@ void regenerateQuads() {
         quads.push_back(quad(vertex(x4, y4, 0, -1), vertex(x3, y3, 0, -1),
                              vertex(x2, y2, 0, -1), vertex(x1, y1, 0, -1),
                              false, i + mazeWidth, j + mazeHeight,
-                             map[i + mazeWidth][j + mazeHeight].ceiling, 1));
+                             map[i + mazeWidth][j + mazeHeight].flat[1], 1));
       }
 
       if (map[i + mazeWidth][j + mazeHeight].type & HIGH_BIT &&
@@ -322,7 +324,7 @@ void regenerateQuads() {
             quad(vertex(x4, y4, -unit, -1), vertex(x3, y3, -unit, -1),
                  vertex(x2, y2, -unit, -1), vertex(x1, y1, -unit, -1), false,
                  i + mazeWidth, j + mazeHeight,
-                 map[i + mazeWidth][j + mazeHeight].ceiling, 2));
+                 map[i + mazeWidth][j + mazeHeight].flat[2], 2));
       }
 
       if (map[i + mazeWidth][j + mazeHeight].type & CEILING_BIT &&
@@ -332,7 +334,7 @@ void regenerateQuads() {
             quad(vertex(x4, y4, -unit * 2, -1), vertex(x3, y3, -unit * 2, -1),
                  vertex(x2, y2, -unit * 2, -1), vertex(x1, y1, -unit * 2, -1),
                  false, i + mazeWidth, j + mazeHeight,
-                 map[i + mazeWidth][j + mazeHeight].ceiling, 3));
+                 map[i + mazeWidth][j + mazeHeight].flat[3], 3));
       }
 
       for (int level = 0; level < 3; level++) {
@@ -471,42 +473,42 @@ void makeMaze() {
     for (int j = -mazeHeight; j <= mazeHeight; j++) {
       map[i + mazeWidth][j + mazeHeight].type =
           (i + mazeWidth) % 2 == 1 && (j + mazeHeight) % 2 == 1
-              ? SKY
-              : SKY_SINGLE_BLOCK;
-      map[i + mazeWidth][j + mazeHeight].floor = defaultFloor;
-
+              ? GENERATOR_PATH
+              : GENERATOR_WALL;
+      for (int f = 0; f < 4; f++) {
+        map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
+      }
       for (int f = 0; f < 3; f++) {
         for (int d = 0; d < 4; d++) {
-          map[i + mazeWidth][j + mazeHeight].wall[f][d] = defaultWall;
+          map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
         }
       }
-      map[i + mazeWidth][j + mazeHeight].ceiling = defaultCeiling;
     }
   }
 
   for (int i = 0; i < mazeWidth; i++) {
     for (int j = 0; j < mazeHeight; j++) {
       if (kruskalMaze[i][j].right) {
-        map[i * 2 + 2][j * 2 + 1].type = SKY;
-        map[i * 2 + 2][j * 2 + 1].floor = defaultFloor;
-
+        map[i * 2 + 2][j * 2 + 1].type = GENERATOR_PATH;
+        for (int f = 0; f < 4; f++) {
+          map[i * 2 + 2][j * 2 + 1].flat[f] = DEFAULT_FLAT;
+        }
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
-            map[i * 2 + 2][j * 2 + 1].wall[f][d] = defaultWall;
+            map[i * 2 + 2][j * 2 + 1].wall[f][d] = DEFAULT_WALL;
           }
         }
-        map[i * 2 + 2][j * 2 + 1].ceiling = defaultCeiling;
       }
       if (kruskalMaze[i][j].down) {
-        map[i * 2 + 1][j * 2 + 2].type = SKY;
-        map[i * 2 + 1][j * 2 + 2].floor = defaultFloor;
-
+        map[i * 2 + 1][j * 2 + 2].type = GENERATOR_PATH;
+        for (int f = 0; f < 4; f++) {
+          map[i * 2 + 1][j * 2 + 2].flat[f] = DEFAULT_FLAT;
+        }
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
-            map[i * 2 + 1][j * 2 + 2].wall[f][d] = defaultWall;
+            map[i * 2 + 1][j * 2 + 2].wall[f][d] = DEFAULT_WALL;
           }
         }
-        map[i * 2 + 1][j * 2 + 2].ceiling = defaultCeiling;
       }
     }
   }
@@ -518,35 +520,15 @@ void makeMaze() {
     int y = std::rand() % (mazeWidth * 2 - rh);
     for (int i = x; i <= x + rw; i++) {
       for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = SKY_DOUBLE_BLOCK;
-        map[i][j].floor = defaultFloor;
-
+        map[i][j].type = GENERATOR_ROOM;
+        for (int f = 0; f < 4; f++) {
+          map[i][j].flat[f] = DEFAULT_FLAT;
+        }
         for (int f = 0; f < 3; f++) {
           for (int d = 0; d < 4; d++) {
-            map[i][j].wall[f][d] = defaultWall;
+            map[i][j].wall[f][d] = DEFAULT_WALL;
           }
         }
-        map[i][j].ceiling = defaultCeiling;
-      }
-    }
-  }
-
-  for (int r = 0; r < 10; r++) {
-    int rw = std::rand() % 10 + 5;
-    int rh = std::rand() % 10 + 5;
-    int x = std::rand() % (mazeWidth * 2 - rw);
-    int y = std::rand() % (mazeWidth * 2 - rh);
-    for (int i = x; i <= x + rw; i++) {
-      for (int j = y; j <= y + rh; j++) {
-        map[i][j].type = SKY;
-        map[i][j].floor = defaultFloor;
-
-        for (int f = 0; f < 3; f++) {
-          for (int d = 0; d < 4; d++) {
-            map[i][j].wall[f][d] = defaultWall;
-          }
-        }
-        map[i][j].ceiling = defaultCeiling;
       }
     }
   }
@@ -629,7 +611,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       std::cout << "Error occurred loading level." << std::endl;
       return;
     }
-
+    
     regenerateQuads();
 
     std::cout << "Level loaded: " << filename.str() << std::endl;
@@ -699,14 +681,14 @@ class Olc3d2 : public olc::PixelGameEngine {
   void handleInputs(float frameLength) {
     mousePos = GetMousePos();
 
-    if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) {
-      int iMax = static_cast<int>(w / (tileSize + 10));
+    if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
+      int iMax = static_cast<int>(w / (TILE_SIZE + 10));
       int jMax = static_cast<int>(176 / iMax) + 1;
 
       selectedTexture =
-          static_cast<int>(mousePos.y / (tileSize + 10.0f)) * iMax +
-          static_cast<int>(mousePos.x < (iMax - 1) * (tileSize + 10.0f)
-                               ? mousePos.x / (tileSize + 10.0f)
+          static_cast<int>(mousePos.y / (TILE_SIZE + 10.0f)) * iMax +
+          static_cast<int>(mousePos.x < (iMax - 1) * (TILE_SIZE + 10.0f)
+                               ? mousePos.x / (TILE_SIZE + 10.0f)
                                : (iMax - 1));
 
       if (selectedTexture < 0) selectedTexture = 0;
@@ -729,17 +711,24 @@ class Olc3d2 : public olc::PixelGameEngine {
           int f = quad::cursorQuad->wallF;
           int d = quad::cursorQuad->wallD;
 
+          uint8_t candidateTexture;
           if (quad::cursorQuad->wall) {
-            map[x][y].wall[f][d] = selectedTexture;
-          } else {
-            if (f == 0) {
-              map[x][y].floor = selectedTexture;
-            } else {
-              map[x][y].ceiling = selectedTexture;
-            }
+            candidateTexture = map[x][y].wall[f][d];
+          } else if (f == 0) {
+            candidateTexture = map[x][y].flat[f];
           }
 
-          quad::cursorQuad->renderable = &texture[selectedTexture];
+          if (candidateTexture != selectedTexture) {
+            undoBuffer.push_back(action(map[x][y], x, y));
+
+            if (quad::cursorQuad->wall) {
+              map[x][y].wall[f][d] = selectedTexture;
+            } else {
+              map[x][y].flat[f] = selectedTexture;
+            }
+
+            quad::cursorQuad->renderable = &texture[selectedTexture];
+          }
 
         } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
           angle += static_cast<float>(mousePos.x - lastMousePos.x) / 600 *
@@ -754,14 +743,16 @@ class Olc3d2 : public olc::PixelGameEngine {
           if (quad::cursorQuad->wall) {
             selectedTexture = map[x][y].wall[f][d];
           } else if (f == 0) {
-            selectedTexture = map[x][y].floor;
-          } else {
-            selectedTexture = map[x][y].ceiling;
+            selectedTexture = map[x][y].flat[f];
           }
 
-        } else if (GetKey(olc::Key::T).bHeld && !GetKey(olc::Key::CTRL).bHeld) {
+        } else if (GetKey(olc::Key::T).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
+          int x = quad::cursorQuad->mapX;
+          int y = quad::cursorQuad->mapY;
+          undoBuffer.push_back(action(map[x][y], x, y));
+
           setQuadTexture(cursorX, cursorY, selectedTexture, true);
-          setQuadTexture(cursorX, cursorY, selectedTexture, false, true);
+          setQuadTexture(cursorX, cursorY, selectedTexture, false);
         }
       }
 
@@ -788,6 +779,13 @@ class Olc3d2 : public olc::PixelGameEngine {
           levelNo = 10;
         }
 
+        if (GetKey(olc::Key::Z).bPressed && undoBuffer.size() > 0) {
+          action u = undoBuffer.back();
+          map[u.x][u.y] = u.cell;
+          regenerateQuads();
+          undoBuffer.pop_back();
+        }
+
         if (GetKey(olc::Key::C).bPressed) {
           noClip = !noClip;
         }
@@ -805,18 +803,21 @@ class Olc3d2 : public olc::PixelGameEngine {
         }
 
         if (GetKey(olc::Key::L).bPressed) {
-          loadLevel();
+          undoBuffer.clear();
+          loadLevel();          
         }
 
         if (GetKey(olc::Key::M).bPressed) {
           day = true;
           clearMap();
+          undoBuffer.clear();
           regenerateQuads();
         }
 
         if (GetKey(olc::Key::G).bPressed) {
           day = false;
           makeMaze();
+          undoBuffer.clear();
           regenerateQuads();
         }
 
@@ -875,11 +876,13 @@ class Olc3d2 : public olc::PixelGameEngine {
         int y = quad::cursorQuad->mapY;
 
         if (GetKey(olc::Key::SPACE).bPressed) {
+          undoBuffer.push_back(action(map[x][y], x, y));
+
           map[x][y].type = selectedBlockTypes[selectedBlock];
           regenerateQuads();
           if (autoTexture) {
             setQuadTexture(x, y, selectedTexture, true);
-            setQuadTexture(x, y, selectedTexture, false, true);
+            setQuadTexture(x, y, selectedTexture, false);
           }
           quad::cursorQuad = nullptr;
         }
@@ -1087,7 +1090,7 @@ class Olc3d2 : public olc::PixelGameEngine {
         int lostCornerCount = 0;
 
         for (int j = 0; j < 4; j++) {
-          if (q.adjusted[j].y < omega) lostCornerCount++;
+          if (q.adjusted[j].y < OMEGA) lostCornerCount++;
         }
 
         if (lostCornerCount > 0) {
@@ -1115,7 +1118,7 @@ class Olc3d2 : public olc::PixelGameEngine {
             float dx0 = (x3 - x0) / d0;
             float dy0 = (y3 - y0) / d0;
 
-            float lambdaY = omega;
+            float lambdaY = OMEGA;
             float lambda = (lambdaY - y0) / dy0;
             float lambdaX = x0 + lambda * dx0;
 
@@ -1162,32 +1165,32 @@ class Olc3d2 : public olc::PixelGameEngine {
             if (n == 0) {
               u = 0;
               v = 0;
-              du = tileSize * alpha / d1;
-              dv = tileSize * alpha / d2;
+              du = TILE_SIZE * alpha / d1;
+              dv = TILE_SIZE * alpha / d2;
               order = {0, 1, 2, 3};
             }
 
             if (n == 1) {
               u = 0;
-              v = tileSize * (1 - alpha / d2);
-              du = tileSize * alpha / d1;
-              dv = tileSize * alpha / d2;
+              v = TILE_SIZE * (1 - alpha / d2);
+              du = TILE_SIZE * alpha / d1;
+              dv = TILE_SIZE * alpha / d2;
               order = {3, 0, 1, 2};
             }
 
             if (n == 2) {
-              u = tileSize * (1 - alpha / d1);
-              v = tileSize * (1 - alpha / d2);
-              du = tileSize * alpha / d1;
-              dv = tileSize * alpha / d2;
+              u = TILE_SIZE * (1 - alpha / d1);
+              v = TILE_SIZE * (1 - alpha / d2);
+              du = TILE_SIZE * alpha / d1;
+              dv = TILE_SIZE * alpha / d2;
               order = {2, 3, 0, 1};
             }
 
             if (n == 3) {
-              u = tileSize * (1 - alpha / d1);
+              u = TILE_SIZE * (1 - alpha / d1);
               v = 0;
-              du = tileSize * alpha / d1;
-              dv = tileSize * alpha / d2;
+              du = TILE_SIZE * alpha / d1;
+              dv = TILE_SIZE * alpha / d2;
               order = {1, 2, 3, 0};
             }
 
@@ -1197,8 +1200,8 @@ class Olc3d2 : public olc::PixelGameEngine {
                  static_cast<int>(dv)},
                 q.colour));
 
-            if (y1 >= omega) {
-              float yTheta = omega;
+            if (y1 >= OMEGA) {
+              float yTheta = OMEGA;
               float theta = (yTheta - y1) / (y3 - y1);
               float xTheta = x1 + theta * (x3 - x1);
               float zTheta = z1 + theta * (z3 - z1);
@@ -1214,33 +1217,33 @@ class Olc3d2 : public olc::PixelGameEngine {
 
               if (n == 0) {
                 u = 0;
-                v = tileSize * alpha / d1;
-                du = tileSize * theta;
-                dv = tileSize * (1 - alpha / d1);
+                v = TILE_SIZE * alpha / d1;
+                du = TILE_SIZE * theta;
+                dv = TILE_SIZE * (1 - alpha / d1);
                 order = {0, 1, 2, 3};
               }
 
               if (n == 1) {
-                u = tileSize * alpha / d1;
-                v = tileSize * (1 - theta);
-                du = tileSize * (1 - alpha / d1);
-                dv = tileSize * theta;
+                u = TILE_SIZE * alpha / d1;
+                v = TILE_SIZE * (1 - theta);
+                du = TILE_SIZE * (1 - alpha / d1);
+                dv = TILE_SIZE * theta;
                 order = {3, 0, 1, 2};
               }
 
               if (n == 2) {
-                u = tileSize * (1 - theta);
+                u = TILE_SIZE * (1 - theta);
                 v = 0;
-                du = tileSize * theta;
-                dv = tileSize * (1 - alpha / d1);
+                du = TILE_SIZE * theta;
+                dv = TILE_SIZE * (1 - alpha / d1);
                 order = {2, 3, 0, 1};
               }
 
               if (n == 3) {
                 u = 0;
                 v = 0;
-                du = tileSize * (1 - alpha / d1);
-                dv = tileSize * theta;
+                du = TILE_SIZE * (1 - alpha / d1);
+                dv = TILE_SIZE * theta;
                 order = {1, 2, 3, 0};
               }
 
@@ -1251,8 +1254,8 @@ class Olc3d2 : public olc::PixelGameEngine {
                   q.colour));
             }
 
-            if (y2 >= omega) {
-              float yTheta = omega;
+            if (y2 >= OMEGA) {
+              float yTheta = OMEGA;
               float theta = (yTheta - y2) / (y3 - y2);
               float xTheta = x2 + theta * (x3 - x2);
               float zTheta = z2 + theta * (z3 - z2);
@@ -1269,34 +1272,34 @@ class Olc3d2 : public olc::PixelGameEngine {
               std::vector<int> order;
 
               if (n == 0) {
-                u = tileSize * alpha / d1;
+                u = TILE_SIZE * alpha / d1;
                 v = 0;
-                du = tileSize * (1 - alpha / d1);
-                dv = tileSize * theta;
+                du = TILE_SIZE * (1 - alpha / d1);
+                dv = TILE_SIZE * theta;
                 order = {0, 1, 2, 3};
               }
 
               if (n == 1) {
                 u = 0;
                 v = 0;
-                du = tileSize * theta;
-                dv = tileSize * (1 - alpha / d1);
+                du = TILE_SIZE * theta;
+                dv = TILE_SIZE * (1 - alpha / d1);
                 order = {3, 0, 1, 2};
               }
 
               if (n == 2) {
                 u = 0;
-                v = tileSize * (1 - theta);
-                du = tileSize * (1 - alpha / d1);
-                dv = tileSize * theta;
+                v = TILE_SIZE * (1 - theta);
+                du = TILE_SIZE * (1 - alpha / d1);
+                dv = TILE_SIZE * theta;
                 order = {2, 3, 0, 1};
               }
 
               if (n == 3) {
-                u = tileSize * (1 - theta);
-                v = tileSize * alpha / d1;
-                du = tileSize * theta;
-                dv = tileSize * (1 - alpha / d1);
+                u = TILE_SIZE * (1 - theta);
+                v = TILE_SIZE * alpha / d1;
+                du = TILE_SIZE * theta;
+                dv = TILE_SIZE * (1 - alpha / d1);
                 order = {1, 2, 3, 0};
               }
 
@@ -1310,14 +1313,14 @@ class Olc3d2 : public olc::PixelGameEngine {
         }
       } else {
         q.sourcePos.x = 0;
-        q.sourceSize.x = tileSize;
+        q.sourceSize.x = TILE_SIZE;
 
         bool cropped[4]{false, false, false, false};
 
         int cropCount = 0;
 
         for (int i = 0; i < 4; i++) {
-          if (q.adjusted[i].y < omega) {
+          if (q.adjusted[i].y < OMEGA) {
             cropped[i] = true;
             cropCount++;
           }
@@ -1330,7 +1333,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (cropCount > 0) {
           int key = -1;
-          float lowestY = omega;
+          float lowestY = OMEGA;
           for (int i = 0; i < 4; i++) {
             if (q.adjusted[i].y < lowestY) {
               lowestY = q.adjusted[i].y;
@@ -1348,7 +1351,7 @@ class Olc3d2 : public olc::PixelGameEngine {
           float keyY = q.adjusted[key].y;
           float pairY = q.adjusted[q.vertices[key].pair].y;
 
-          float delta = 1 - (omega - pairY) / (keyY - pairY);
+          float delta = 1 - (OMEGA - pairY) / (keyY - pairY);
 
           for (int i = 0; i < 4; i++) {
             if (!cropped[i]) continue;
@@ -1366,10 +1369,10 @@ class Olc3d2 : public olc::PixelGameEngine {
 
             if (i > pair) {
               q.sourcePos.x = 0;
-              q.sourceSize.x = tileSize * (1 - delta);
+              q.sourceSize.x = TILE_SIZE * (1 - delta);
             } else {
-              q.sourcePos.x = delta * tileSize;
-              q.sourceSize.x = (1 - delta) * tileSize;
+              q.sourcePos.x = delta * TILE_SIZE;
+              q.sourceSize.x = (1 - delta) * TILE_SIZE;
             }
           }
         }
@@ -1407,8 +1410,8 @@ class Olc3d2 : public olc::PixelGameEngine {
         q.maxProjectedY = 0;
         for (int i = 0; i < 4; i++) {
           q.projected[i] = {
-              w / 2 - (q.adjusted[i].x * zoom) / (q.adjusted[i].y + omega),
-              h / 2 + (q.adjusted[i].z * zoom) / (q.adjusted[i].y + omega)};
+              w / 2 - (q.adjusted[i].x * zoom) / (q.adjusted[i].y + OMEGA),
+              h / 2 + (q.adjusted[i].z * zoom) / (q.adjusted[i].y + OMEGA)};
           if (q.projected[i].x < q.minProjectedX)
             q.minProjectedX = q.projected[i].x;
           if (q.projected[i].y < q.minProjectedY)
@@ -1422,9 +1425,9 @@ class Olc3d2 : public olc::PixelGameEngine {
         for (auto& p : q.partials) {
           for (int i = 0; i < 4; i++) {
             p.projected[i].x =
-                w / 2 - (p.adjusted[i].x * zoom) / (p.adjusted[i].y + omega);
+                w / 2 - (p.adjusted[i].x * zoom) / (p.adjusted[i].y + OMEGA);
             p.projected[i].y =
-                h / 2 + (p.adjusted[i].z * zoom) / (p.adjusted[i].y + omega);
+                h / 2 + (p.adjusted[i].z * zoom) / (p.adjusted[i].y + OMEGA);
           }
         }
       }
@@ -1436,7 +1439,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   void updateCursor() {
-    if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) return;
+    if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) return;
 
     float bestDsquared = drawDistance * drawDistance;
 
@@ -1549,78 +1552,6 @@ class Olc3d2 : public olc::PixelGameEngine {
         olc::RED);
   }
 
-  void renderQuadMap() {
-    for (auto q : quads) {
-      if (q.partials.size() > 0) {
-        for (auto p : q.partials) {
-          olc::vf2d pv[4] = {
-              {-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2},
-              {-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2},
-              {-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2},
-              {-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2}};
-
-          DrawLine(-p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                   -p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                   olc::YELLOW);
-
-          DrawLine(-p.adjusted[1].x + w / 2, -p.adjusted[1].y + h / 2,
-                   -p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                   olc::YELLOW);
-
-          DrawLine(-p.adjusted[2].x + w / 2, -p.adjusted[2].y + h / 2,
-                   -p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                   olc::YELLOW);
-
-          DrawLine(-p.adjusted[3].x + w / 2, -p.adjusted[3].y + h / 2,
-                   -p.adjusted[0].x + w / 2, -p.adjusted[0].y + h / 2,
-                   olc::YELLOW);
-        }
-
-      } else if (q.visible) {
-        if (!q.wall) {
-          olc::vf2d pv[4] = {
-              {-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2},
-              {-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2},
-              {-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2},
-              {-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2}};
-
-        } else {
-          DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   olc::GREEN);
-          DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                   -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   olc::GREEN);
-          DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                   -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   olc::GREEN);
-          DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                   -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                   olc::GREEN);
-          FillCircle(-q.centre.x + w / 2, -q.centre.y + h / 2, 3, olc::GREEN);
-        }
-      } else {
-        DrawLine(-q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 -q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[1].x + w / 2, -q.adjusted[1].y + h / 2,
-                 -q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[2].x + w / 2, -q.adjusted[2].y + h / 2,
-                 -q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-        DrawLine(-q.adjusted[3].x + w / 2, -q.adjusted[3].y + h / 2,
-                 -q.adjusted[0].x + w / 2, -q.adjusted[0].y + h / 2,
-                 q.wall ? olc::DARK_RED : olc::DARK_MAGENTA);
-      }
-    }
-
-    DrawLine(0, h / 2, w, h / 2, olc::BLUE);
-    DrawLine(0, h / 2 - omega, w, h / 2 - omega, olc::YELLOW);
-
-    FillCircle(w / 2, h / 2, 5, olc::GREEN);
-  }
-
   void renderQuads() {
     int qCount = 0;
 
@@ -1648,57 +1579,53 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (qCount > qMax) qMax = qCount;
 
-    if (showHelp) {
-      std::ostringstream stringStream;
+    std::ostringstream stringStream;
 
-      stringStream << "./maps/level" << levelNo << ".dat" << std::endl;
-      stringStream << std::endl;
+    stringStream << "./maps/level" << levelNo << ".dat" << std::endl;
+    stringStream << std::endl;
 
-      stringStream << "Quads: " << qCount << " (Max: " << qMax << ")"
-                   << std::endl
-                   << "Zoom: " << static_cast<int>(200 * zoom / w)
-                   << "% | Range: " << drawDistance << " | " << GetFPS()
-                   << " FPS" << std::endl
-                   << "X: " << myX << " Y: " << myY << " Z: " << myZ
-                   << std::endl;
+    stringStream << "Quads: " << qCount << " (Max: " << qMax << ")" << std::endl
+                 << "Zoom: " << static_cast<int>(200 * zoom / w)
+                 << "% | Range: " << drawDistance << " | " << GetFPS() << " FPS"
+                 << std::endl
+                 << "X: " << myX << " Y: " << myY << " Z: " << myZ << std::endl;
 
-      if (quad::cursorQuad != nullptr) {
-        stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
-                     << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
-                     << ", Level: " << quad::cursorQuad->wallF
-                     << ", Direction: " << quad::cursorQuad->wallD
-                     << (autoTexture ? " [Auto]" : "")
-                     << (noClip ? " [Noclip]" : "") << std::endl;
-      }
-
-      stringStream << std::endl;
-      stringStream << "1 2 3 4 5 6 7 8 9 0 - =" << std::endl;
-      stringStream << "        _ _ _ _ _ _ _ _" << std::endl;
-      stringStream << "    _ _ # # # #     _ _" << std::endl;
-      stringStream << "    # #   _ # #   _ # #" << std::endl;
-      stringStream << "_ # _ # _ # _ # _ # _ #" << std::endl << std::endl;
-
-      for (int i = 0; i < 12; i++) {
-        if (i == selectedBlock) {
-          stringStream << "^ ";
-        } else {
-          stringStream << "  ";
-        }
-      }
-
-      DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
+    if (quad::cursorQuad != nullptr) {
+      stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
+                   << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
+                   << ", Level: " << quad::cursorQuad->wallF
+                   << ", Direction: " << quad::cursorQuad->wallD
+                   << (autoTexture ? " [Auto]" : "")
+                   << (noClip ? " [Noclip]" : "") << std::endl;
     }
+
+    stringStream << std::endl;
+    stringStream << "1 2 3 4 5 6 7 8 9 0 - =" << std::endl;
+    stringStream << "        _ _ _ _ _ _ _ _" << std::endl;
+    stringStream << "    _ _ # # # #     _ _" << std::endl;
+    stringStream << "    # #   _ # #   _ # #" << std::endl;
+    stringStream << "_ # _ # _ # _ # _ # _ #" << std::endl << std::endl;
+
+    for (int i = 0; i < 12; i++) {
+      if (i == selectedBlock) {
+        stringStream << "^ ";
+      } else {
+        stringStream << "  ";
+      }
+    }
+
+    DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
   }
 
   void renderTileSelector() {
-    int iMax = static_cast<int>(w / (tileSize + 10));
+    int iMax = static_cast<int>(w / (TILE_SIZE + 10));
     int jMax = static_cast<int>(176 / iMax) + 1;
     for (int j = 0; j < jMax; j++) {
       for (int i = 0; i < iMax; i++) {
         int k = j * iMax + i;
         if (k >= 176) continue;
-        DrawDecal({static_cast<float>(i * (tileSize + 10) + 10),
-                   static_cast<float>(j * (tileSize + 10) + 10)},
+        DrawDecal({static_cast<float>(i * (TILE_SIZE + 10) + 10),
+                   static_cast<float>(j * (TILE_SIZE + 10) + 10)},
                   texture[k].decal, {1, 1},
                   k == selectedTexture ? olc::WHITE : olc::GREY);
       }
@@ -1711,13 +1638,14 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Left Click - Apply Texture (One surface)" << std::endl
                  << "T - Apply Texture (whole column, exlc. floor)" << std::endl
                  << "Right Click (Drag) or Left/Right - Turn" << std::endl
-                 << "Middle Click (Hold) or Shift - Choose Texture" << std::endl
+                 << "Middle Click (Hold) or \\ - Choose Texture" << std::endl
                  << "Q - Pick Texture" << std::endl
                  << "Ctrl + 1,2,3...-,= or Mouse Wheel - Pick Block Type"
                  << std::endl
+                 << "Space - Apply block type" << std::endl
+                 << "Ctrl + Z - Undo texture or block change" << std::endl
                  << "-/+ - Zoom" << std::endl
                  << ",/. - Render Distance" << std::endl
-                 << "R/F - Raise / Lower Ceiling" << std::endl
                  << "PgUp/PgDn - Fly Up / Down" << std::endl
                  << "End - Reset Height" << std::endl
                  << "Up/Down - Look up / down (Experimental)" << std::endl
@@ -1725,8 +1653,6 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Ctrl + Home - Reset View Zoom & Render Distance"
                  << std::endl
                  << "Tab - Show map" << std::endl
-                 << "Tab - Show map" << std::endl
-                 << "Ctrl + \\ - Show rendering details" << std::endl
                  << "Ctrl + G - Generate new maze" << std::endl
                  << "Ctrl + M - Generate empty map" << std::endl
                  << "N - Switch between night and day" << std::endl
@@ -1757,15 +1683,13 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (GetKey(olc::Key::TAB).bHeld) {
       renderMazeMap();
-    } else if (GetKey(olc::Key::CTRL).bHeld && GetKey(olc::Key::OEM_5).bHeld) {
-      renderQuadMap();
     } else {
       sortQuads();
       renderQuads();
-      if (GetMouse(2).bHeld || GetKey(olc::Key::SHIFT).bHeld) {
+      if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
         renderTileSelector();
       } else {
-        DrawDecal({w / 2 - tileSize / 2, 10}, texture[selectedTexture].decal,
+        DrawDecal({w / 2 - TILE_SIZE / 2, 10}, texture[selectedTexture].decal,
                   {1, 1});
       }
       if (showHelp) renderHelp();
