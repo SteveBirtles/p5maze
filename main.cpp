@@ -202,8 +202,10 @@ const int MAX_HEIGHT = 100;
 int mazeWidth = 40;
 int mazeHeight = 40;
 float drawDistance = 30 * unit;
+const int MAX_CLIPBOARD_SIZE = 100;
 
 mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
+mapCell clipBoard[MAX_CLIPBOARD_SIZE][MAX_CLIPBOARD_SIZE];
 kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
 
 struct action {
@@ -823,6 +825,9 @@ class Olc3d2 : public olc::PixelGameEngine {
             int y2 = selectionStartY > selectionEndY ? selectionStartY
                                                      : selectionEndY;
 
+            if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
+            if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
+
             for (int i = x1; i <= x2; i++) {
               for (int j = y1; j <= y2; j++) {
                 undoBuffer.push_back(action(map[i][j], i, j, frame));
@@ -904,7 +909,7 @@ class Olc3d2 : public olc::PixelGameEngine {
           regenerateQuads();
         }
 
-        if (GetKey(olc::Key::C).bPressed) {
+        if (GetKey(olc::Key::N).bPressed) {
           noClip = !noClip;
         }
 
@@ -1008,6 +1013,9 @@ class Olc3d2 : public olc::PixelGameEngine {
             int y2 = selectionStartY > selectionEndY ? selectionStartY
                                                      : selectionEndY;
 
+            if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
+            if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
+
             for (int i = x1; i <= x2; i++) {
               for (int j = y1; j <= y2; j++) {
                 undoBuffer.push_back(action(map[i][j], i, j, frame));
@@ -1051,7 +1059,7 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (zoom < w / 4) zoom = w / 4;
       if (zoom > w * 5) zoom = w * 5;
 
-      if (GetKey(olc::Key::N).bPressed) {
+      if (GetKey(olc::Key::N).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
         day = !day;
       }
 
@@ -1870,6 +1878,11 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Ctrl + 1,2,3...-,= or Mouse Wheel - Pick Block Type"
                  << std::endl
                  << "Space - Apply block type" << std::endl
+                 << "E - Pick block type" << std::endl
+                 << "Shift - Select region" << std::endl
+                 << "Escape - Cancel selection" << std::endl
+                 << "Ctrl + C - Copy column on selection" << std::endl
+                 << "Ctrl + V - Paste column on selection" << std::endl
                  << "Ctrl + Z - Undo texture or block change" << std::endl
                  << "-/+ - Zoom" << std::endl
                  << ",/. - Render Distance" << std::endl
@@ -1883,6 +1896,7 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Ctrl + G - Generate new maze" << std::endl
                  << "Ctrl + M - Generate empty map" << std::endl
                  << "N - Switch between night and day" << std::endl
+                 << "Ctrl + N - No-clip mode" << std::endl
                  << "Ctrl + S - Save level" << std::endl
                  << "Ctrl + L - Load level" << std::endl
                  << "Ctrl + 1,2,3...0 - Pick save slot, 1-10" << std::endl
