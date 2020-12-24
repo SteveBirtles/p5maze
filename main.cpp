@@ -52,6 +52,7 @@ struct Renderable {
 };
 
 Renderable texture[176];
+Renderable sprite[50];
 
 struct vertex {
   float x;
@@ -141,6 +142,35 @@ quad* quad::cursorQuad = nullptr;
 
 std::vector<quad> quads;
 std::vector<quad*> sortedQuads;
+
+struct entity {
+  Renderable* renderable;
+  vertex position;
+  vertex adjusted;
+  olc::vf2d projected;
+  olc::vf2d scale;
+  bool visible;
+  double dSquared;
+  bool outOfRange;
+  olc::Pixel colour;
+  int mapX;
+  int mapY;
+  int level;
+  entity() {
+    mapX = -1;
+    mapY = -1;
+  };
+  entity(vertex _p, int _mapX, int _mapY, int spriteNo, int _level = 0) {
+    position = _p;
+    mapX = _mapX;
+    mapY = _mapY;
+    renderable = &sprite[spriteNo];
+    level = _level;
+  }
+};
+
+std::vector<entity> entities;
+std::vector<entity*> sortedEntities;
 
 struct mapCell {
   uint8_t type;
@@ -408,6 +438,18 @@ void regenerateQuads() {
   }
 }
 
+void makeEntities(int count) {
+  entities.clear();
+
+  for (int i = 0; i < count; i++) {
+    int x = std::rand() % mazeWidth;
+    int y = std::rand() % mazeHeight;
+    int s = std::rand() % 50;
+    entities.push_back(
+        entity(vertex(x * unit, y * unit, unit / 2, -1), x, y, s));
+  }
+}
+
 bool kruskalStep() {
   bool oneSet = true;
   for (int i = 0; i < mazeWidth; i++) {
@@ -640,6 +682,12 @@ class Olc3d2 : public olc::PixelGameEngine {
       texture[i].Load(filename.str());
     }
 
+    for (int i = 0; i < 50; i++) {
+      std::ostringstream filename;
+      filename << "./items/item" << (i + 1) << ".png";
+      sprite[i].Load(filename.str());
+    }
+
     std::srand(std::time(nullptr));
     loadLevel();
 
@@ -860,6 +908,10 @@ class Olc3d2 : public olc::PixelGameEngine {
           noClip = !noClip;
         }
 
+        if (GetKey(olc::Key::E).bPressed) {
+          makeEntities(1000);
+        }
+
         if (GetKey(olc::Key::T).bPressed) {
           autoTexture = !autoTexture;
         }
@@ -985,7 +1037,7 @@ class Olc3d2 : public olc::PixelGameEngine {
           quad::cursorQuad = nullptr;
         }
 
-        if (GetKey(olc::Key::E).bPressed) {
+        if (GetKey(olc::Key::E).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
           for (int i = 0; i < 12; i++) {
             if (map[x][y].type == selectedBlockTypes[i]) {
               selectedBlock = i;
@@ -1146,6 +1198,38 @@ class Olc3d2 : public olc::PixelGameEngine {
         myX = (mapX + 0.25 - mazeWidth) * unit;
       if (eastWest > 0.75 && west && dx > 0)
         myX = (mapX + 0.75 - mazeWidth) * unit;
+    }
+  }
+
+  void updateEntities() {
+    for (auto& e : entities) {
+      e.outOfRange = std::abs(e.position.x - myX) > drawDistance ||
+                     std::abs(e.position.y - myY) > drawDistance;
+
+      if (e.outOfRange) continue;
+
+      e.adjusted.x = (e.position.x - myX) * m[0][0] +
+                     (e.position.y - myY) * m[0][1] +
+                     (e.position.z - myZ) * m[0][2];
+      e.adjusted.y = (e.position.x - myX) * m[1][0] +
+                     (e.position.y - myY) * m[1][1] +
+                     (e.position.z - myZ) * m[1][2];
+      e.adjusted.z = (e.position.x - myX) * m[2][0] +
+                     (e.position.y - myY) * m[2][1] +
+                     (e.position.z - myZ) * m[2][2];
+      e.visible = true;
+
+      if (e.adjusted.x > drawDistance || e.adjusted.y > drawDistance ||
+          e.adjusted.z > drawDistance) {
+        e.visible = false;
+        continue;
+      }
+
+      e.projected = {w / 2 - (e.adjusted.x * zoom) / (e.adjusted.y + OMEGA),
+                     h / 2 + (e.adjusted.z * zoom) / (e.adjusted.y + OMEGA)};
+
+      e.scale = {(unit / 4) * zoom / (e.adjusted.y + OMEGA),
+                 -(unit / 4) * zoom / (e.adjusted.y + OMEGA)};
     }
   }
 
@@ -1576,6 +1660,20 @@ class Olc3d2 : public olc::PixelGameEngine {
     lastMousePos = mousePos;
   }
 
+  void sortEntities() {
+    sortedEntities.clear();
+
+    for (auto& entity : entities) {
+      if (entity.outOfRange) continue;
+      if (entity.dSquared > drawDistance * drawDistance) continue;
+      entity.colour = olc::Pixel(255, 255, 255);
+      sortedEntities.push_back(&entity);
+    }
+
+    std::sort(sortedEntities.begin(), sortedEntities.end(),
+              [](entity* a, entity* b) { return a->dSquared > b->dSquared; });
+  }
+
   void sortQuads() {
     sortedQuads.clear();
 
@@ -1662,10 +1760,25 @@ class Olc3d2 : public olc::PixelGameEngine {
         olc::RED);
   }
 
-  void renderQuads() {
+  void renderQuads(bool renderEntities = false) {
     int qCount = 0;
+    int eCount = 0;
+
+    int e = 0;
 
     for (auto& q : sortedQuads) {
+      while (e < sortedEntities.size() &&
+             sortedEntities[e]->dSquared < q->dSquared) {
+        if (sortedEntities[e]->visible) {
+          DrawDecal(sortedEntities[e]->projected,
+                    sortedEntities[e]->renderable->decal,
+                    sortedEntities[e]->scale);
+
+          eCount++;
+        }
+        e++;
+      }
+
       float dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
                          q->centre.z * q->normal.z;
 
@@ -1695,6 +1808,8 @@ class Olc3d2 : public olc::PixelGameEngine {
     stringStream << std::endl;
 
     stringStream << "Quads: " << qCount << " (Max: " << qMax << ")" << std::endl
+                 << "Entities: " << eCount << " / " << entities.size()
+                 << std::endl
                  << "Zoom: " << static_cast<int>(200 * zoom / w)
                  << "% | Range: " << drawDistance << " | " << GetFPS() << " FPS"
                  << std::endl
@@ -1786,7 +1901,7 @@ class Olc3d2 : public olc::PixelGameEngine {
     if (!noClip) handleInteractions();
 
     updateQuads();
-
+    updateEntities();
     updateCursor();
 
     if (day) {
@@ -1799,7 +1914,8 @@ class Olc3d2 : public olc::PixelGameEngine {
       renderMazeMap();
     } else {
       sortQuads();
-      renderQuads();
+      sortEntities();
+      renderQuads(true);
       if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
         renderTileSelector();
       } else {
