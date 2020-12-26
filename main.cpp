@@ -7,6 +7,7 @@ const int w = 1280;
 const int h = 1024;
 
 const int TILE_SIZE = 64;
+const int SPRITE_SIZE = 64;
 const float OMEGA = 0.1;
 
 const uint8_t DEFAULT_FLAT = 97;
@@ -446,11 +447,13 @@ void makeEntities(int count) {
   entities.clear();
 
   for (int i = 0; i < count; i++) {
-    int x = std::rand() % mazeWidth;
-    int y = std::rand() % mazeHeight;
+    int x = std::rand() % (mazeWidth * 2) - mazeWidth;
+    int y = std::rand() % (mazeHeight * 2) - mazeHeight;
     int s = std::rand() % 50;
     entities.push_back(
-        entity(vertex(x * unit, y * unit, unit / 2, -1), x, y, s));
+        entity(vertex(static_cast<float>(x + 0.5) * unit,
+                      static_cast<float>(y + 0.5) * unit, 7 * unit / 8, -1),
+               x, y, s));
   }
 }
 
@@ -707,6 +710,7 @@ class Olc3d2 : public olc::PixelGameEngine {
   olc::vi2d mousePos;
   olc::vi2d lastMousePos;
   int cursorX, cursorY;
+  int cursorRotation = 0;
 
   uint8_t selectedTexture = 1;
   int selectedBlock = 0;
@@ -856,6 +860,14 @@ class Olc3d2 : public olc::PixelGameEngine {
             if (GetKey(olc::Key::C).bPressed)
               setQuadTexture(x, y, selectedTexture, false);
           }
+        }
+      }
+
+      if (GetKey(olc::Key::R).bPressed) {
+        if (GetKey(olc::Key::CTRL).bHeld) {
+          cursorRotation = (cursorRotation + 7) % 8;
+        } else {
+          cursorRotation = (cursorRotation + 1) % 8;
         }
       }
 
@@ -1016,15 +1028,13 @@ class Olc3d2 : public olc::PixelGameEngine {
 
           clipboardWidth = x2 - x1 + 1;
           clipboardHeight = y2 - y1 + 1;
+          cursorRotation = 0;
 
           for (int i = x1; i <= x2; i++) {
             for (int j = y1; j <= y2; j++) {
               clipboard[i - x1][j - y1] = map[i][j];
             }
           }
-
-          std::cout << "Clipboard: " << clipboardWidth << ", "
-                    << clipboardHeight << std::endl;
         }
       }
 
@@ -1080,8 +1090,79 @@ class Olc3d2 : public olc::PixelGameEngine {
         if (GetKey(olc::Key::V).bPressed && GetKey(olc::Key::CTRL).bHeld) {
           for (int i = 0; i < clipboardWidth; i++) {
             for (int j = 0; j < clipboardHeight; j++) {
-              if (i + x > 2 * mazeWidth || j + y > 2 * mazeWidth) continue;
-              map[i + x][j + y] = clipboard[i][j];
+              switch (cursorRotation) {
+                case 0:
+                  if (x + i < 0 || y + j < 0 || x + i > 2 * mazeWidth ||
+                      y + j > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x + i][y + j], x + i, y + j, frame));
+                  map[x + i][y + j] = clipboard[i][j];
+                  break;
+
+                case 1:
+                  if (x + j < 0 || y + i < 0 || x + j > 2 * mazeWidth ||
+                      y + i > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x + j][y + i], x + j, y + i, frame));
+                  map[x + j][y + i] = clipboard[i][j];
+                  break;
+
+                case 2:
+                  if (x - j < 0 || y + i < 0 || x - j > 2 * mazeWidth ||
+                      y + i > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x - j][y + i], x - j, y + i, frame));
+                  map[x - j][y + i] = clipboard[i][j];
+                  break;
+
+                case 3:
+                  if (x - i < 0 || y + j < 0 || x - i > 2 * mazeWidth ||
+                      y + j > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x - i][y + j], x - i, y + j, frame));
+                  map[x - i][y + j] = clipboard[i][j];
+                  break;
+
+                case 4:
+                  if (x - i < 0 || y - j < 0 || x - i > 2 * mazeWidth ||
+                      y - j > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x - i][y - j], x - i, y - j, frame));
+                  map[x - i][y - j] = clipboard[i][j];
+                  break;
+
+                case 5:
+                  if (x - j < 0 || y - i < 0 || x - j > 2 * mazeWidth ||
+                      y - i > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x - j][y - i], x - j, y - i, frame));
+                  map[x - j][y - i] = clipboard[i][j];
+                  break;
+
+                case 6:
+                  if (x + i < 0 || y - i < 0 || x + j > 2 * mazeWidth ||
+                      y - i > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x + j][y - i], x + j, y - i, frame));
+                  map[x + j][y - i] = clipboard[i][j];
+                  break;
+
+                case 7:
+                  if (x + i < 0 || y - j < 0 || x + i > 2 * mazeWidth ||
+                      y - j > 2 * mazeWidth)
+                    continue;
+                  undoBuffer.push_back(
+                      action(map[x + i][y - j], x + i, y - j, frame));
+                  map[x + i][y - j] = clipboard[i][j];
+                  break;
+              }
             }
           }
           regenerateQuads();
@@ -1270,16 +1351,21 @@ class Olc3d2 : public olc::PixelGameEngine {
       e.visible = true;
 
       if (e.adjusted.x > drawDistance || e.adjusted.y > drawDistance ||
-          e.adjusted.z > drawDistance) {
+          e.adjusted.z > drawDistance || e.adjusted.y < OMEGA) {
         e.visible = false;
         continue;
       }
 
-      e.projected = {w / 2 - (e.adjusted.x * zoom) / (e.adjusted.y + OMEGA),
-                     h / 2 + (e.adjusted.z * zoom) / (e.adjusted.y + OMEGA)};
+      e.scale = {5 * SPRITE_SIZE / (e.adjusted.y + OMEGA),
+                 5 * SPRITE_SIZE / (e.adjusted.y + OMEGA)};
 
-      e.scale = {(unit / 4) * zoom / (e.adjusted.y + OMEGA),
-                 -(unit / 4) * zoom / (e.adjusted.y + OMEGA)};
+      e.projected = {w / 2 - (e.adjusted.x * zoom) / (e.adjusted.y + OMEGA) -
+                         (SPRITE_SIZE / 2) * e.scale.x,
+                     h / 2 + (e.adjusted.z * zoom) / (e.adjusted.y + OMEGA) -
+                         (SPRITE_SIZE / 2) * e.scale.y};
+
+      e.dSquared = std::pow(e.adjusted.x, 2) + std::pow(e.adjusted.y, 2) +
+                   std::pow(e.adjusted.z, 2);
     }
   }
 
@@ -1715,7 +1801,22 @@ class Olc3d2 : public olc::PixelGameEngine {
     for (auto& entity : entities) {
       if (entity.outOfRange) continue;
       if (entity.dSquared > drawDistance * drawDistance) continue;
-      entity.colour = olc::Pixel(255, 255, 255);
+
+      float fade = 1 - std::sqrt(entity.dSquared) / drawDistance;
+      if (fade < 0) continue;
+
+      if (day) {
+        int alpha = 255;
+        if (fade < 0.25) {
+          alpha = static_cast<int>(255.0f * 4 * fade);
+        }
+        int rgb = static_cast<int>(128 + 128 * std::pow(fade, 2));
+        entity.colour = olc::Pixel(rgb, rgb, rgb, alpha);
+      } else {
+        int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
+        entity.colour = olc::Pixel(rgb, rgb, rgb);
+      }
+
       sortedEntities.push_back(&entity);
     }
 
@@ -1742,9 +1843,39 @@ class Olc3d2 : public olc::PixelGameEngine {
       int y2 =
           selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
 
-      if (clipboardPreview && quad.mapX >= cursorX && quad.mapY >= cursorY &&
-          quad.mapX <= cursorX + clipboardWidth &&
-          quad.mapY <= cursorY + clipboardHeight) {
+      if (clipboardPreview &&
+
+          ((cursorRotation == 0 && quad.mapX >= cursorX &&
+            quad.mapX < cursorX + clipboardWidth && quad.mapY >= cursorY &&
+            quad.mapY < cursorY + clipboardHeight) ||
+
+           (cursorRotation == 1 && quad.mapX >= cursorX &&
+            quad.mapX < cursorX + clipboardHeight && quad.mapY >= cursorY &&
+            quad.mapY < cursorY + clipboardWidth) ||
+
+           (cursorRotation == 2 && quad.mapX <= cursorX &&
+            quad.mapY >= cursorY && quad.mapX > cursorX - clipboardHeight &&
+            quad.mapY < cursorY + clipboardWidth) ||
+
+           (cursorRotation == 3 && quad.mapX <= cursorX &&
+            quad.mapX > cursorX - clipboardWidth && quad.mapY >= cursorY &&
+            quad.mapY < cursorY + clipboardHeight) ||
+
+           (cursorRotation == 4 && quad.mapX <= cursorX &&
+            quad.mapY <= cursorY && quad.mapX > cursorX - clipboardWidth &&
+            quad.mapY > cursorY - clipboardHeight) ||
+
+           (cursorRotation == 5 && quad.mapX <= cursorX &&
+            quad.mapY <= cursorY && quad.mapX > cursorX - clipboardHeight &&
+            quad.mapY > cursorY - clipboardWidth) ||
+
+           (cursorRotation == 6 && quad.mapX >= cursorX &&
+            quad.mapX < cursorX + clipboardHeight && quad.mapY <= cursorY &&
+            quad.mapY > cursorY - clipboardWidth) ||
+
+           (cursorRotation == 7 && quad.mapX >= cursorX &&
+            quad.mapY <= cursorY && quad.mapX < cursorX + clipboardWidth &&
+            quad.mapY > cursorY - clipboardHeight))) {
         quad.colour = olc::Pixel(255, 64, 255);
       } else if (selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
                  quad.mapX <= x2 && quad.mapY <= y2) {
@@ -1821,14 +1952,14 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     for (auto& q : sortedQuads) {
       while (e < sortedEntities.size() &&
-             sortedEntities[e]->dSquared < q->dSquared) {
-        if (sortedEntities[e]->visible) {
-          DrawDecal(sortedEntities[e]->projected,
-                    sortedEntities[e]->renderable->decal,
-                    sortedEntities[e]->scale);
+             sortedEntities[e]->dSquared > q->dSquared) {
+        auto E = sortedEntities[e];
 
+        if (E->visible) {
+          DrawDecal(E->projected, E->renderable->decal, E->scale, E->colour);
           eCount++;
         }
+
         e++;
       }
 
@@ -1875,6 +2006,12 @@ class Olc3d2 : public olc::PixelGameEngine {
                    << ", Direction: " << quad::cursorQuad->direction
                    << (autoTexture ? " [Auto]" : "")
                    << (noClip ? " [Noclip]" : "") << std::endl;
+    }
+
+    if (clipboardWidth > -1 && clipboardHeight > -1) {
+      stringStream << "Clipboard: " << clipboardWidth << " x "
+                   << clipboardHeight << " [" << cursorRotation << "]"
+                   << std::endl;
     }
 
     stringStream << std::endl;
