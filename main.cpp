@@ -69,8 +69,8 @@ struct vertex {
 };
 
 struct partial {
-  olc::vi2d sourcePos;
-  olc::vi2d sourceSize;
+  olc::vf2d sourcePos;
+  olc::vf2d sourceSize;
   std::array<olc::vf2d, 4> projected;
   std::array<vertex, 4> adjusted;
   olc::Pixel colour;
@@ -90,8 +90,8 @@ struct quad {
   Renderable* renderable;
   std::array<vertex, 4> vertices;
   std::array<vertex, 4> adjusted;
-  olc::vi2d sourcePos;
-  olc::vi2d sourceSize;
+  olc::vf2d sourcePos;
+  olc::vf2d sourceSize;
   bool visible;
   bool wall;
   bool cropped;
@@ -205,7 +205,9 @@ float drawDistance = 30 * unit;
 const int MAX_CLIPBOARD_SIZE = 100;
 
 mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
-mapCell clipBoard[MAX_CLIPBOARD_SIZE][MAX_CLIPBOARD_SIZE];
+mapCell clipboard[MAX_CLIPBOARD_SIZE][MAX_CLIPBOARD_SIZE];
+int clipboardWidth = -1, clipboardHeight = -1;
+bool clipboardPreview = false;
 kruskalCell kruskalMaze[MAX_WIDTH][MAX_HEIGHT];
 
 struct action {
@@ -998,6 +1000,34 @@ class Olc3d2 : public olc::PixelGameEngine {
 
       if (myZ > unit / 2) myZ = unit / 2;
 
+      if (GetKey(olc::Key::C).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+        if (selectionLive) {
+          int x1 =
+              selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
+          int y1 =
+              selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
+          int x2 =
+              selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
+          int y2 =
+              selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
+
+          if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
+          if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
+
+          clipboardWidth = x2 - x1 + 1;
+          clipboardHeight = y2 - y1 + 1;
+
+          for (int i = x1; i <= x2; i++) {
+            for (int j = y1; j <= y2; j++) {
+              clipboard[i - x1][j - y1] = map[i][j];
+            }
+          }
+
+          std::cout << "Clipboard: " << clipboardWidth << ", "
+                    << clipboardHeight << std::endl;
+        }
+      }
+
       if (quad::cursorQuad != nullptr) {
         int x = quad::cursorQuad->mapX;
         int y = quad::cursorQuad->mapY;
@@ -1043,6 +1073,18 @@ class Olc3d2 : public olc::PixelGameEngine {
             }
           }
           quad::cursorQuad = nullptr;
+        }
+
+        clipboardPreview = GetKey(olc::Key::V).bHeld;
+
+        if (GetKey(olc::Key::V).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+          for (int i = 0; i < clipboardWidth; i++) {
+            for (int j = 0; j < clipboardHeight; j++) {
+              if (i + x > 2 * mazeWidth || j + y > 2 * mazeWidth) continue;
+              map[i + x][j + y] = clipboard[i][j];
+            }
+          }
+          regenerateQuads();
         }
 
         if (GetKey(olc::Key::E).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
@@ -1545,7 +1587,6 @@ class Olc3d2 : public olc::PixelGameEngine {
 
           for (int i = 0; i < 4; i++) {
             if (!cropped[i]) continue;
-
             int pair = q.vertices[i].pair;
 
             q.adjusted[i].x = q.adjusted[i].x +
@@ -1701,8 +1742,12 @@ class Olc3d2 : public olc::PixelGameEngine {
       int y2 =
           selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
 
-      if (selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
-          quad.mapX <= x2 && quad.mapY <= y2) {
+      if (clipboardPreview && quad.mapX >= cursorX && quad.mapY >= cursorY &&
+          quad.mapX <= cursorX + clipboardWidth &&
+          quad.mapY <= cursorY + clipboardHeight) {
+        quad.colour = olc::Pixel(255, 64, 255);
+      } else if (selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
+                 quad.mapX <= x2 && quad.mapY <= y2) {
         quad.colour = olc::Pixel(64, 255, 255);
       } else if (cursorX == quad.mapX && cursorY == quad.mapY) {
         if (day) {
