@@ -115,8 +115,9 @@ struct quad {
     mapX = -1;
     mapY = -1;
   };
-  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall, int _mapX,
-       int _mapY, int textureNo = 7, int _level = 0, int _direction = -1) {
+  quad(vertex _p0, vertex _p1, vertex _p2, vertex _p3, bool _wall = false,
+       int _mapX = 0, int _mapY = 0, int textureNo = -1, int _level = 0,
+       int _direction = -1) {
     vertices[0] = _p0;
     vertices[1] = _p1;
     vertices[2] = _p2;
@@ -130,7 +131,11 @@ struct quad {
     wall = _wall;
     level = _level;
     direction = _direction;
-    renderable = &texture[textureNo];
+    if (textureNo != -1) {
+      renderable = &texture[textureNo];
+    } else {
+      renderable = nullptr;
+    }
   }
   ~quad() {
     if (quad::cursorQuad == this) {
@@ -142,6 +147,7 @@ struct quad {
 quad* quad::cursorQuad = nullptr;
 
 std::vector<quad> quads;
+std::vector<quad> playQuads;
 std::vector<quad*> sortedQuads;
 
 struct entity {
@@ -447,9 +453,16 @@ void makeEntities(int count) {
   entities.clear();
 
   for (int i = 0; i < count; i++) {
+  tryAgain:
+
     int x = std::rand() % (mazeWidth * 2) - mazeWidth;
     int y = std::rand() % (mazeHeight * 2) - mazeHeight;
     int s = std::rand() % 50;
+
+    for (auto e : entities) {
+      if (e.mapX == x && e.mapY == y) goto tryAgain;
+    }
+
     entities.push_back(
         entity(vertex(static_cast<float>(x + 0.5) * unit,
                       static_cast<float>(y + 0.5) * unit, 7 * unit / 8, -1),
@@ -603,6 +616,9 @@ class Olc3d2 : public olc::PixelGameEngine {
   bool autoTexture = false;
   int levelNo = 1;
   bool exitSignal = false;
+  bool editMode = true;
+
+  float editCameraAngle, editCameraPitch, editCameraX, editCameraY, editCameraZ;
 
   int selectionStartX;
   int selectionStartY;
@@ -697,16 +713,19 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     std::srand(std::time(nullptr));
     loadLevel();
+    makeEntities(1000);
 
     return true;
   }
 
-  float angle = 0;
-  float pitch = 0;
-  float myX = unit / 2;
-  float myY = unit / 2;
-  float myZ = unit / 2;
-  float lastMyX, lastMyY, lastAngle;
+  float cameraAngle = 0;
+  float cameraPitch = 0;
+  float cameraX = unit / 2;
+  float cameraY = unit / 2;
+  float cameraZ = unit / 2;
+
+  float lastCameraX, lastCameraY, lastCameraAngle;
+
   olc::vi2d mousePos;
   olc::vi2d lastMousePos;
   int cursorX, cursorY;
@@ -734,11 +753,11 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   void updateMatrix() {
     float m1[3][3] = {{1, 0, 0},
-                      {0, std::cos(pitch), std::sin(pitch)},
-                      {0, -std::sin(pitch), std::cos(pitch)}};
+                      {0, std::cos(cameraPitch), std::sin(cameraPitch)},
+                      {0, -std::sin(cameraPitch), std::cos(cameraPitch)}};
 
-    float m2[3][3] = {{std::cos(angle), -std::sin(angle), 0},
-                      {std::sin(angle), std::cos(angle), 0},
+    float m2[3][3] = {{std::cos(cameraAngle), -std::sin(cameraAngle), 0},
+                      {std::sin(cameraAngle), std::cos(cameraAngle), 0},
                       {0, 0, 1}};
 
     for (int i = 0; i < 3; i++) {
@@ -749,8 +768,48 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
   }
 
-  void handleInputs(float frameLength) {
+  void handlePlayInputs(float frameLength) {
+    if (GetKey(olc::Key::P).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+      cameraAngle = editCameraAngle;
+      cameraPitch = editCameraPitch;
+      cameraX = editCameraX;
+      cameraY = editCameraY;
+      cameraZ = editCameraZ;
+      playQuads.clear();
+      editMode = true;
+    }
+  }
+
+  void handleEditInputs(float frameLength) {
     mousePos = GetMousePos();
+
+    if (GetKey(olc::Key::P).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+      editCameraAngle = cameraAngle;
+      editCameraPitch = cameraPitch;
+      editCameraX = cameraX;
+      editCameraY = cameraY;
+      editCameraZ = cameraZ;
+      editMode = false;
+      playQuads.clear();
+
+      float myX = cameraX + 3 * unit * std::sin(cameraAngle);
+      float myY = cameraY + 3 * unit * std::cos(cameraAngle);
+
+      float x1 = unit * myX;
+      float y1 = unit * myY;
+      float x2 = x1 + unit;
+      float y2 = y1;
+      float x4 = x1;
+      float y4 = y1 + unit;
+      float x3 = x1 + (x2 - x1) + (x4 - x1);
+      float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+      playQuads.push_back(quad(vertex(x1, y1, 0, -1), vertex(x2, y2, 0, -1),
+                               vertex(x3, y3, 0, -1), vertex(x4, y4, 0, -1)));
+
+      cameraPitch = 0.6;
+      cameraZ = -unit;
+    }
 
     if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
       int iMax = static_cast<int>(w / (TILE_SIZE + 10));
@@ -771,8 +830,8 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (mouseWheel < 0) selectedBlock = (selectedBlock + 1) % 12;
       if (mouseWheel > 0) selectedBlock = (selectedBlock + 11) % 12;
 
-      if (GetKey(olc::Key::LEFT).bHeld) angle += 2 * frameLength;
-      if (GetKey(olc::Key::RIGHT).bHeld) angle -= 2 * frameLength;
+      if (GetKey(olc::Key::LEFT).bHeld) cameraAngle += 2 * frameLength;
+      if (GetKey(olc::Key::RIGHT).bHeld) cameraAngle -= 2 * frameLength;
 
       if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
           cursorY <= mazeHeight * 2) {
@@ -802,8 +861,8 @@ class Olc3d2 : public olc::PixelGameEngine {
           }
 
         } else if (GetMouse(1).bHeld && quad::cursorQuad != nullptr) {
-          angle -= static_cast<float>(mousePos.x - lastMousePos.x) / (w / 4) *
-                   ((w / 2) / zoom);
+          cameraAngle -= static_cast<float>(mousePos.x - lastMousePos.x) /
+                         (w / 4) * ((w / 2) / zoom);
 
         } else if (GetKey(olc::Key::Q).bPressed) {
           int x = quad::cursorQuad->mapX;
@@ -1002,15 +1061,15 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (drawDistance > unit * mazeWidth * 2)
         drawDistance = unit * mazeWidth * 2;
 
-      if (GetKey(olc::Key::DOWN).bHeld) pitch += 2 * frameLength;
-      if (GetKey(olc::Key::UP).bHeld) pitch -= 2 * frameLength;
-      if (GetKey(olc::Key::HOME).bHeld) pitch = 0;
+      if (GetKey(olc::Key::DOWN).bHeld) cameraPitch += 2 * frameLength;
+      if (GetKey(olc::Key::UP).bHeld) cameraPitch -= 2 * frameLength;
+      if (GetKey(olc::Key::HOME).bHeld) cameraPitch = 0;
 
-      if (GetKey(olc::Key::PGUP).bHeld) myZ -= unit * 2 * frameLength;
-      if (GetKey(olc::Key::PGDN).bHeld) myZ += unit * 2 * frameLength;
-      if (GetKey(olc::Key::END).bHeld) myZ = unit / 2;
+      if (GetKey(olc::Key::PGUP).bHeld) cameraZ -= unit * 2 * frameLength;
+      if (GetKey(olc::Key::PGDN).bHeld) cameraZ += unit * 2 * frameLength;
+      if (GetKey(olc::Key::END).bHeld) cameraZ = unit / 2;
 
-      if (myZ > unit / 2) myZ = unit / 2;
+      if (cameraZ > unit / 2) cameraZ = unit / 2;
 
       if (GetKey(olc::Key::C).bPressed && GetKey(olc::Key::CTRL).bHeld) {
         if (selectionLive) {
@@ -1190,44 +1249,44 @@ class Olc3d2 : public olc::PixelGameEngine {
         showHelp = !showHelp;
       }
 
-      if (pitch < -1.571) pitch = -1.571;
-      if (pitch > 1.571) pitch = 1.571;
+      if (cameraPitch < -1.571) cameraPitch = -1.571;
+      if (cameraPitch > 1.571) cameraPitch = 1.571;
 
-      lastMyX = myX;
-      lastMyY = myY;
-      lastAngle = angle;
+      lastCameraX = cameraX;
+      lastCameraY = cameraY;
+      lastCameraAngle = cameraAngle;
 
       if (!GetKey(olc::Key::CTRL).bHeld) {
         if (GetKey(olc::Key::W).bHeld) {
-          myX += std::sin(angle) * unit * 2 * frameLength;
-          myY += std::cos(angle) * unit * 2 * frameLength;
+          cameraX += std::sin(cameraAngle) * unit * 2 * frameLength;
+          cameraY += std::cos(cameraAngle) * unit * 2 * frameLength;
         }
         if (GetKey(olc::Key::S).bHeld) {
-          myX -= std::sin(angle) * unit * 2 * frameLength;
-          myY -= std::cos(angle) * unit * 2 * frameLength;
+          cameraX -= std::sin(cameraAngle) * unit * 2 * frameLength;
+          cameraY -= std::cos(cameraAngle) * unit * 2 * frameLength;
         }
         if (GetKey(olc::Key::A).bHeld) {
-          myX += std::cos(angle) * unit * 2 * frameLength;
-          myY += -std::sin(angle) * unit * 2 * frameLength;
+          cameraX += std::cos(cameraAngle) * unit * 2 * frameLength;
+          cameraY += -std::sin(cameraAngle) * unit * 2 * frameLength;
         }
         if (GetKey(olc::Key::D).bHeld) {
-          myX -= std::cos(angle) * unit * 2 * frameLength;
-          myY -= -std::sin(angle) * unit * 2 * frameLength;
+          cameraX -= std::cos(cameraAngle) * unit * 2 * frameLength;
+          cameraY -= -std::sin(cameraAngle) * unit * 2 * frameLength;
         }
       }
     }
   }
 
   void handleInteractions() {
-    int mapX = myX / unit + mazeWidth;
-    int mapY = myY / unit + mazeHeight;
+    int mapX = cameraX / unit + mazeWidth;
+    int mapY = cameraY / unit + mazeHeight;
 
     int mapZ = 0;
-    if (myZ < -5 * unit / 2 || myZ > unit / 2)
+    if (cameraZ < -5 * unit / 2 || cameraZ > unit / 2)
       return;
-    else if (myZ < -3 * unit / 2)
+    else if (cameraZ < -3 * unit / 2)
       mapZ = 2;
-    else if (myZ < -unit / 2)
+    else if (cameraZ < -unit / 2)
       mapZ = 1;
 
     uint8_t INTERACTION_BIT;
@@ -1243,8 +1302,8 @@ class Olc3d2 : public olc::PixelGameEngine {
         break;
     }
 
-    float dx = myX - lastMyX;
-    float dy = myY - lastMyY;
+    float dx = cameraX - lastCameraX;
+    float dy = cameraY - lastCameraY;
 
     if (mapX > 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
         mapY < mazeWidth * 2 + 1) {
@@ -1253,8 +1312,8 @@ class Olc3d2 : public olc::PixelGameEngine {
            southWest = false;
 
       double intBit;
-      float eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      float northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+      float eastWest = std::modf(cameraX / unit + mazeWidth - mapX, &intBit);
+      float northSouth = std::modf(cameraY / unit + mazeHeight - mapY, &intBit);
 
       east = map[mapX - 1][mapY].type & INTERACTION_BIT;
       west = map[mapX + 1][mapY].type & INTERACTION_BIT;
@@ -1270,12 +1329,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           northEast) {
         if (dx < 0 && dy < 0) {
           if (-dx > -dy)
-            myX = (mapX + 0.25 - mazeWidth) * unit;
+            cameraX = (mapX + 0.25 - mazeWidth) * unit;
           else
-            myY = (mapY + 0.25 - mazeHeight) * unit;
+            cameraY = (mapY + 0.25 - mazeHeight) * unit;
         } else {
-          if (dx < 0) myX = (mapX + 0.25 - mazeWidth) * unit;
-          if (dy < 0) myY = (mapY + 0.25 - mazeHeight) * unit;
+          if (dx < 0) cameraX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy < 0) cameraY = (mapY + 0.25 - mazeHeight) * unit;
         }
       }
 
@@ -1283,12 +1342,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           northWest) {
         if (dx > 0 && dy < 0) {
           if (dx > -dy)
-            myX = (mapX + 0.75 - mazeWidth) * unit;
+            cameraX = (mapX + 0.75 - mazeWidth) * unit;
           else
-            myY = (mapY + 0.25 - mazeHeight) * unit;
+            cameraY = (mapY + 0.25 - mazeHeight) * unit;
         } else {
-          if (dx > 0) myX = (mapX + 0.75 - mazeWidth) * unit;
-          if (dy < 0) myY = (mapY + 0.25 - mazeHeight) * unit;
+          if (dx > 0) cameraX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy < 0) cameraY = (mapY + 0.25 - mazeHeight) * unit;
         }
       }
 
@@ -1296,12 +1355,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           southEast) {
         if (dx < 0 && dy > 0) {
           if (-dx < dy)
-            myX = (mapX + 0.25 - mazeWidth) * unit;
+            cameraX = (mapX + 0.25 - mazeWidth) * unit;
           else
-            myY = (mapY + 0.75 - mazeHeight) * unit;
+            cameraY = (mapY + 0.75 - mazeHeight) * unit;
         } else {
-          if (dx < 0) myX = (mapX + 0.25 - mazeWidth) * unit;
-          if (dy > 0) myY = (mapY + 0.75 - mazeHeight) * unit;
+          if (dx < 0) cameraX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy > 0) cameraY = (mapY + 0.75 - mazeHeight) * unit;
         }
       }
 
@@ -1309,45 +1368,45 @@ class Olc3d2 : public olc::PixelGameEngine {
           southWest) {
         if (dx > 0 && dy > 0) {
           if (dx > dy)
-            myX = (mapX + 0.75 - mazeWidth) * unit;
+            cameraX = (mapX + 0.75 - mazeWidth) * unit;
           else
-            myY = (mapY + 0.75 - mazeHeight) * unit;
+            cameraY = (mapY + 0.75 - mazeHeight) * unit;
         } else {
-          if (dx > 0) myX = (mapX + 0.75 - mazeWidth) * unit;
-          if (dy > 0) myY = (mapY + 0.75 - mazeHeight) * unit;
+          if (dx > 0) cameraX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy > 0) cameraY = (mapY + 0.75 - mazeHeight) * unit;
         }
       }
 
-      eastWest = std::modf(myX / unit + mazeWidth - mapX, &intBit);
-      northSouth = std::modf(myY / unit + mazeHeight - mapY, &intBit);
+      eastWest = std::modf(cameraX / unit + mazeWidth - mapX, &intBit);
+      northSouth = std::modf(cameraY / unit + mazeHeight - mapY, &intBit);
 
       if (northSouth < 0.25 && north && dy < 0)
-        myY = (mapY + 0.25 - mazeHeight) * unit;
+        cameraY = (mapY + 0.25 - mazeHeight) * unit;
       if (northSouth > 0.75 && south && dy > 0)
-        myY = (mapY + 0.75 - mazeHeight) * unit;
+        cameraY = (mapY + 0.75 - mazeHeight) * unit;
       if (eastWest < 0.25 && east && dx < 0)
-        myX = (mapX + 0.25 - mazeWidth) * unit;
+        cameraX = (mapX + 0.25 - mazeWidth) * unit;
       if (eastWest > 0.75 && west && dx > 0)
-        myX = (mapX + 0.75 - mazeWidth) * unit;
+        cameraX = (mapX + 0.75 - mazeWidth) * unit;
     }
   }
 
   void updateEntities() {
     for (auto& e : entities) {
-      e.outOfRange = std::abs(e.position.x - myX) > drawDistance ||
-                     std::abs(e.position.y - myY) > drawDistance;
+      e.outOfRange = std::abs(e.position.x - cameraX) > drawDistance ||
+                     std::abs(e.position.y - cameraY) > drawDistance;
 
       if (e.outOfRange) continue;
 
-      e.adjusted.x = (e.position.x - myX) * m[0][0] +
-                     (e.position.y - myY) * m[0][1] +
-                     (e.position.z - myZ) * m[0][2];
-      e.adjusted.y = (e.position.x - myX) * m[1][0] +
-                     (e.position.y - myY) * m[1][1] +
-                     (e.position.z - myZ) * m[1][2];
-      e.adjusted.z = (e.position.x - myX) * m[2][0] +
-                     (e.position.y - myY) * m[2][1] +
-                     (e.position.z - myZ) * m[2][2];
+      e.adjusted.x = (e.position.x - cameraX) * m[0][0] +
+                     (e.position.y - cameraY) * m[0][1] +
+                     (e.position.z - cameraZ) * m[0][2];
+      e.adjusted.y = (e.position.x - cameraX) * m[1][0] +
+                     (e.position.y - cameraY) * m[1][1] +
+                     (e.position.z - cameraZ) * m[1][2];
+      e.adjusted.z = (e.position.x - cameraX) * m[2][0] +
+                     (e.position.y - cameraY) * m[2][1] +
+                     (e.position.z - cameraZ) * m[2][2];
       e.visible = true;
 
       if (e.adjusted.x > drawDistance || e.adjusted.y > drawDistance ||
@@ -1371,8 +1430,8 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   void updateQuads() {
     for (auto& q : quads) {
-      q.outOfRange = std::abs(q.vertices[0].x - myX) > drawDistance ||
-                     std::abs(q.vertices[0].y - myY) > drawDistance;
+      q.outOfRange = std::abs(q.vertices[0].x - cameraX) > drawDistance ||
+                     std::abs(q.vertices[0].y - cameraY) > drawDistance;
 
       if (q.outOfRange) continue;
 
@@ -1381,17 +1440,17 @@ class Olc3d2 : public olc::PixelGameEngine {
       float maxZ = 0;
 
       for (int i = 0; i < 4; i++) {
-        q.adjusted[i].x = (q.vertices[i].x - myX) * m[0][0] +
-                          (q.vertices[i].y - myY) * m[0][1] +
-                          (q.vertices[i].z - myZ) * m[0][2];
+        q.adjusted[i].x = (q.vertices[i].x - cameraX) * m[0][0] +
+                          (q.vertices[i].y - cameraY) * m[0][1] +
+                          (q.vertices[i].z - cameraZ) * m[0][2];
         if (std::abs(q.adjusted[i].x) > maxX) maxX = std::abs(q.adjusted[i].x);
-        q.adjusted[i].y = (q.vertices[i].x - myX) * m[1][0] +
-                          (q.vertices[i].y - myY) * m[1][1] +
-                          (q.vertices[i].z - myZ) * m[1][2];
+        q.adjusted[i].y = (q.vertices[i].x - cameraX) * m[1][0] +
+                          (q.vertices[i].y - cameraY) * m[1][1] +
+                          (q.vertices[i].z - cameraZ) * m[1][2];
         if (std::abs(q.adjusted[i].y) > maxY) maxY = std::abs(q.adjusted[i].y);
-        q.adjusted[i].z = (q.vertices[i].x - myX) * m[2][0] +
-                          (q.vertices[i].y - myY) * m[2][1] +
-                          (q.vertices[i].z - myZ) * m[2][2];
+        q.adjusted[i].z = (q.vertices[i].x - cameraX) * m[2][0] +
+                          (q.vertices[i].y - cameraY) * m[2][1] +
+                          (q.vertices[i].z - cameraZ) * m[2][2];
         if (std::abs(q.adjusted[i].z) > maxZ) maxZ = std::abs(q.adjusted[i].z);
         q.visible = true;
         q.cropped = false;
@@ -1830,57 +1889,58 @@ class Olc3d2 : public olc::PixelGameEngine {
     for (auto& quad : quads) {
       if (quad.outOfRange) continue;
       if (quad.dSquared > drawDistance * drawDistance) continue;
-      if (quad.cropped && pitch != 0) continue;
+      if (quad.cropped && cameraPitch != 0) continue;
       float fade = 1 - std::sqrt(quad.dSquared) / drawDistance;
       if (fade < 0) continue;
 
-      int x1 =
-          selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
-      int y1 =
-          selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
-      int x2 =
-          selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
-      int y2 =
-          selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
+      bool inSelection = false;
+      bool inPreview = false;
 
-      if (clipboardPreview &&
+      if (editMode && clipboardPreview) {
+        int x1 =
+            selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
+        int y1 =
+            selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
+        int x2 =
+            selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
+        int y2 =
+            selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
 
-          ((cursorRotation == 0 && quad.mapX >= cursorX &&
-            quad.mapX < cursorX + clipboardWidth && quad.mapY >= cursorY &&
-            quad.mapY < cursorY + clipboardHeight) ||
+        inSelection = selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
+                      quad.mapX <= x2 && quad.mapY <= y2;
 
-           (cursorRotation == 1 && quad.mapX >= cursorX &&
-            quad.mapX < cursorX + clipboardHeight && quad.mapY >= cursorY &&
-            quad.mapY < cursorY + clipboardWidth) ||
+        inPreview =
+            cursorRotation == 0 && quad.mapX >= cursorX &&
+                quad.mapX < cursorX + clipboardWidth && quad.mapY >= cursorY &&
+                quad.mapY < cursorY + clipboardHeight ||
+            cursorRotation == 1 && quad.mapX >= cursorX &&
+                quad.mapX < cursorX + clipboardHeight && quad.mapY >= cursorY &&
+                quad.mapY < cursorY + clipboardWidth ||
+            cursorRotation == 2 && quad.mapX <= cursorX &&
+                quad.mapY >= cursorY && quad.mapX > cursorX - clipboardHeight &&
+                quad.mapY < cursorY + clipboardWidth ||
+            cursorRotation == 3 && quad.mapX <= cursorX &&
+                quad.mapX > cursorX - clipboardWidth && quad.mapY >= cursorY &&
+                quad.mapY < cursorY + clipboardHeight ||
+            cursorRotation == 4 && quad.mapX <= cursorX &&
+                quad.mapY <= cursorY && quad.mapX > cursorX - clipboardWidth &&
+                quad.mapY > cursorY - clipboardHeight ||
+            cursorRotation == 5 && quad.mapX <= cursorX &&
+                quad.mapY <= cursorY && quad.mapX > cursorX - clipboardHeight &&
+                quad.mapY > cursorY - clipboardWidth ||
+            cursorRotation == 6 && quad.mapX >= cursorX &&
+                quad.mapX < cursorX + clipboardHeight && quad.mapY <= cursorY &&
+                quad.mapY > cursorY - clipboardWidth ||
+            cursorRotation == 7 && quad.mapX >= cursorX &&
+                quad.mapY <= cursorY && quad.mapX < cursorX + clipboardWidth &&
+                quad.mapY > cursorY - clipboardHeight;
+      }
 
-           (cursorRotation == 2 && quad.mapX <= cursorX &&
-            quad.mapY >= cursorY && quad.mapX > cursorX - clipboardHeight &&
-            quad.mapY < cursorY + clipboardWidth) ||
-
-           (cursorRotation == 3 && quad.mapX <= cursorX &&
-            quad.mapX > cursorX - clipboardWidth && quad.mapY >= cursorY &&
-            quad.mapY < cursorY + clipboardHeight) ||
-
-           (cursorRotation == 4 && quad.mapX <= cursorX &&
-            quad.mapY <= cursorY && quad.mapX > cursorX - clipboardWidth &&
-            quad.mapY > cursorY - clipboardHeight) ||
-
-           (cursorRotation == 5 && quad.mapX <= cursorX &&
-            quad.mapY <= cursorY && quad.mapX > cursorX - clipboardHeight &&
-            quad.mapY > cursorY - clipboardWidth) ||
-
-           (cursorRotation == 6 && quad.mapX >= cursorX &&
-            quad.mapX < cursorX + clipboardHeight && quad.mapY <= cursorY &&
-            quad.mapY > cursorY - clipboardWidth) ||
-
-           (cursorRotation == 7 && quad.mapX >= cursorX &&
-            quad.mapY <= cursorY && quad.mapX < cursorX + clipboardWidth &&
-            quad.mapY > cursorY - clipboardHeight))) {
+      if (inPreview) {
         quad.colour = olc::Pixel(255, 64, 255);
-      } else if (selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
-                 quad.mapX <= x2 && quad.mapY <= y2) {
+      } else if (inSelection) {
         quad.colour = olc::Pixel(64, 255, 255);
-      } else if (cursorX == quad.mapX && cursorY == quad.mapY) {
+      } else if (editMode && cursorX == quad.mapX && cursorY == quad.mapY) {
         if (day) {
           quad.colour = olc::Pixel(128, 128, 255);
         } else {
@@ -1933,15 +1993,16 @@ class Olc3d2 : public olc::PixelGameEngine {
       }
     }
 
-    int mapX = myX / unit + mazeWidth;
-    int mapY = myY / unit + mazeHeight;
+    int mapX = cameraX / unit + mazeWidth;
+    int mapY = cameraY / unit + mazeHeight;
 
     FillRect({mapX * size, mapY * size}, {size, size}, olc::RED);
-    DrawLine(
-        {mapX * size + size / 2, mapY * size + size / 2},
-        {mapX * size + size / 2 + static_cast<int>(size * 2 * std::sin(angle)),
-         mapY * size + size / 2 + static_cast<int>(size * 2 * std::cos(angle))},
-        olc::RED);
+    DrawLine({mapX * size + size / 2, mapY * size + size / 2},
+             {mapX * size + size / 2 +
+                  static_cast<int>(size * 2 * std::sin(cameraAngle)),
+              mapY * size + size / 2 +
+                  static_cast<int>(size * 2 * std::cos(cameraAngle))},
+             olc::RED);
   }
 
   void renderQuads(bool renderEntities = false) {
@@ -1986,50 +2047,54 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     if (qCount > qMax) qMax = qCount;
 
-    std::ostringstream stringStream;
+    if (editMode) {
+      std::ostringstream stringStream;
 
-    stringStream << "./maps/level" << levelNo << ".dat" << std::endl;
-    stringStream << std::endl;
+      stringStream << "./maps/level" << levelNo << ".dat" << std::endl;
+      stringStream << std::endl;
 
-    stringStream << "Quads: " << qCount << " (Max: " << qMax << ")" << std::endl
-                 << "Entities: " << eCount << " / " << entities.size()
-                 << std::endl
-                 << "Zoom: " << static_cast<int>(200 * zoom / w)
-                 << "% | Range: " << drawDistance << " | " << GetFPS() << " FPS"
-                 << std::endl
-                 << "X: " << myX << " Y: " << myY << " Z: " << myZ << std::endl;
-
-    if (quad::cursorQuad != nullptr) {
-      stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
-                   << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
-                   << ", Level: " << quad::cursorQuad->level
-                   << ", Direction: " << quad::cursorQuad->direction
-                   << (autoTexture ? " [Auto]" : "")
-                   << (noClip ? " [Noclip]" : "") << std::endl;
-    }
-
-    if (clipboardWidth > -1 && clipboardHeight > -1) {
-      stringStream << "Clipboard: " << clipboardWidth << " x "
-                   << clipboardHeight << " [" << cursorRotation << "]"
+      stringStream << "Quads: " << qCount << " (Max: " << qMax << ")"
+                   << std::endl
+                   << "Entities: " << eCount << " / " << entities.size()
+                   << std::endl
+                   << "Zoom: " << static_cast<int>(200 * zoom / w)
+                   << "% | Range: " << drawDistance << " | " << GetFPS()
+                   << " FPS" << std::endl
+                   << "X: " << cameraX << " Y: " << cameraY << " Z: " << cameraZ
                    << std::endl;
-    }
 
-    stringStream << std::endl;
-    stringStream << "1 2 3 4 5 6 7 8 9 0 - =" << std::endl;
-    stringStream << "        _ _ _ _ _ _ _ _" << std::endl;
-    stringStream << "    _ _ # # # #     _ _" << std::endl;
-    stringStream << "    # #   _ # #   _ # #" << std::endl;
-    stringStream << "_ # _ # _ # _ # _ # _ #" << std::endl << std::endl;
-
-    for (int i = 0; i < 12; i++) {
-      if (i == selectedBlock) {
-        stringStream << "^ ";
-      } else {
-        stringStream << "  ";
+      if (quad::cursorQuad != nullptr) {
+        stringStream << "Cursor " << cursorX << ", " << cursorY << ", "
+                     << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
+                     << ", Level: " << quad::cursorQuad->level
+                     << ", Direction: " << quad::cursorQuad->direction
+                     << (autoTexture ? " [Auto]" : "")
+                     << (noClip ? " [Noclip]" : "") << std::endl;
       }
-    }
 
-    DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
+      if (clipboardWidth > -1 && clipboardHeight > -1) {
+        stringStream << "Clipboard: " << clipboardWidth << " x "
+                     << clipboardHeight << " [" << cursorRotation << "]"
+                     << std::endl;
+      }
+
+      stringStream << std::endl;
+      stringStream << "1 2 3 4 5 6 7 8 9 0 - =" << std::endl;
+      stringStream << "        _ _ _ _ _ _ _ _" << std::endl;
+      stringStream << "    _ _ # # # #     _ _" << std::endl;
+      stringStream << "    # #   _ # #   _ # #" << std::endl;
+      stringStream << "_ # _ # _ # _ # _ # _ #" << std::endl << std::endl;
+
+      for (int i = 0; i < 12; i++) {
+        if (i == selectedBlock) {
+          stringStream << "^ ";
+        } else {
+          stringStream << "  ";
+        }
+      }
+
+      DrawStringDecal({10, 10}, stringStream.str(), olc::WHITE);
+    }
   }
 
   void renderTileSelector() {
@@ -2064,8 +2129,11 @@ class Olc3d2 : public olc::PixelGameEngine {
                  << "Shift - Select region" << std::endl
                  << "Escape - Cancel selection" << std::endl
                  << "Ctrl + C - Copy column on selection" << std::endl
+                 << "V - Preview paste location" << std::endl
                  << "Ctrl + V - Paste column on selection" << std::endl
+                 << "R / Ctrl + R - Change paste transformation" << std::endl
                  << "Ctrl + Z - Undo texture or block change" << std::endl
+                 << "Ctrl + E - Generate random entities" << std::endl
                  << "-/+ - Zoom" << std::endl
                  << ",/. - Render Distance" << std::endl
                  << "PgUp/PgDn - Fly Up / Down" << std::endl
@@ -2090,7 +2158,11 @@ class Olc3d2 : public olc::PixelGameEngine {
   bool OnUserUpdate(float fElapsedTime) override {
     frame++;
 
-    handleInputs(fElapsedTime);
+    if (editMode) {
+      handleEditInputs(fElapsedTime);
+    } else {
+      handlePlayInputs(fElapsedTime);
+    }
 
     updateMatrix();
 
@@ -2098,7 +2170,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     updateQuads();
     updateEntities();
-    updateCursor();
+    if (editMode) updateCursor();
 
     if (day) {
       Clear(olc::Pixel(96, 128, 255));
@@ -2112,13 +2184,15 @@ class Olc3d2 : public olc::PixelGameEngine {
       sortQuads();
       sortEntities();
       renderQuads(true);
-      if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
-        renderTileSelector();
-      } else {
-        DrawDecal({w / 2 - TILE_SIZE / 2, 10}, texture[selectedTexture].decal,
-                  {1, 1});
+      if (editMode) {
+        if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
+          renderTileSelector();
+        } else {
+          DrawDecal({w / 2 - TILE_SIZE / 2, 10}, texture[selectedTexture].decal,
+                    {1, 1});
+        }
+        if (showHelp) renderHelp();
       }
-      if (showHelp) renderHelp();
     }
 
     return !exitSignal;
