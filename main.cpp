@@ -35,25 +35,9 @@ const uint8_t GENERATOR_WALL = WALL;
 const uint8_t GENERATOR_PATH = CORRIDOR;
 const uint8_t GENERATOR_ROOM = HIGH_ROOM;
 
-struct Renderable {
-  Renderable() {}
-
-  void Load(const std::string& sFile) {
-    sprite = new olc::Sprite(sFile);
-    decal = new olc::Decal(sprite);
-  }
-
-  ~Renderable() {
-    delete decal;
-    delete sprite;
-  }
-
-  olc::Sprite* sprite = nullptr;
-  olc::Decal* decal = nullptr;
-};
-
-Renderable texture[176];
-Renderable sprite[50];
+olc::Renderable texture[176];
+olc::Renderable sprite[50];
+olc::Renderable plasma;
 
 struct vertex {
   float x;
@@ -73,24 +57,24 @@ struct partial {
   olc::vf2d sourcePos;
   olc::vf2d sourceSize;
   std::array<olc::vf2d, 4> projected;
-  std::array<vertex, 4> adjusted;
+  std::array<vertex, 4> transformed;
   olc::Pixel colour;
-  partial(std::array<vertex, 4> _adjusted, std::array<int, 4> _texture,
+  partial(std::array<vertex, 4> _transformed, std::array<int, 4> _texture,
           olc::Pixel _colour = olc::WHITE) {
     sourcePos.x = _texture[0];
     sourcePos.y = _texture[1];
     sourceSize.x = _texture[2];
     sourceSize.y = _texture[3];
-    adjusted = _adjusted;
+    transformed = _transformed;
     colour = _colour;
   }
 };
 
 struct quad {
   static quad* cursorQuad;
-  Renderable* renderable;
+  olc::Renderable* renderable;
   std::array<vertex, 4> vertices;
-  std::array<vertex, 4> adjusted;
+  std::array<vertex, 4> transformed;
   olc::vf2d sourcePos;
   olc::vf2d sourceSize;
   bool visible;
@@ -151,9 +135,9 @@ std::vector<quad> playQuads;
 std::vector<quad*> sortedQuads;
 
 struct entity {
-  Renderable* renderable;
+  olc::Renderable* renderable;
   vertex position;
-  vertex adjusted;
+  vertex transformed;
   olc::vf2d projected;
   olc::vf2d scale;
   bool visible;
@@ -711,6 +695,8 @@ class Olc3d2 : public olc::PixelGameEngine {
       sprite[i].Load(filename.str());
     }
 
+    plasma.Load("plamsa.png");
+
     std::srand(std::time(nullptr));
     loadLevel();
     makeEntities(1000);
@@ -792,23 +778,43 @@ class Olc3d2 : public olc::PixelGameEngine {
       editMode = false;
       playQuads.clear();
 
-      float myX = cameraX + 3 * unit * std::sin(cameraAngle);
-      float myY = cameraY + 3 * unit * std::cos(cameraAngle);
+      cameraPitch = 0.6;
+      cameraZ = -unit;
 
-      float x1 = unit * myX;
-      float y1 = unit * myY;
-      float x2 = x1 + unit;
+      float myX = cameraX / unit + 3.0f * std::sin(cameraAngle);
+      float myY = cameraY / unit + 3.0f * std::cos(cameraAngle);
+
+      float x1 = unit * (myX + 0.25);
+      float y1 = unit * (myY + 0.25);
+      float x2 = x1 + unit / 2;
       float y2 = y1;
       float x4 = x1;
-      float y4 = y1 + unit;
+      float y4 = y1 + unit / 2;
       float x3 = x1 + (x2 - x1) + (x4 - x1);
       float y3 = y1 + (y2 - y1) + (y4 - y1);
 
-      playQuads.push_back(quad(vertex(x1, y1, 0, -1), vertex(x2, y2, 0, -1),
-                               vertex(x3, y3, 0, -1), vertex(x4, y4, 0, -1)));
+      float zTop = 0;
+      float zBottom = unit;
 
-      cameraPitch = 0.6;
-      cameraZ = -unit;
+      playQuads.push_back(
+          quad(vertex(x1, y1, zTop, -1), vertex(x2, y2, zTop, -1),
+               vertex(x3, y3, zTop, -1), vertex(x4, y4, zTop, -1)));
+
+      playQuads.push_back(quad(vertex(x2, y2, zBottom, 3),
+                               vertex(x2, y2, zTop, 2), vertex(x1, y1, zTop, 1),
+                               vertex(x1, y1, zBottom, 0)));
+
+      playQuads.push_back(quad(vertex(x3, y3, zBottom, 3),
+                               vertex(x3, y3, zTop, 2), vertex(x2, y2, zTop, 1),
+                               vertex(x2, y2, zBottom, 0)));
+
+      playQuads.push_back(quad(vertex(x4, y4, zBottom, 3),
+                               vertex(x4, y4, zTop, 2), vertex(x3, y3, zTop, 1),
+                               vertex(x3, y3, zBottom, 0)));
+
+      playQuads.push_back(quad(vertex(x1, y1, zBottom, 3),
+                               vertex(x1, y1, zTop, 2), vertex(x4, y4, zTop, 1),
+                               vertex(x4, y4, zBottom, 0)));
     }
 
     if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
@@ -1398,98 +1404,114 @@ class Olc3d2 : public olc::PixelGameEngine {
 
       if (e.outOfRange) continue;
 
-      e.adjusted.x = (e.position.x - cameraX) * m[0][0] +
-                     (e.position.y - cameraY) * m[0][1] +
-                     (e.position.z - cameraZ) * m[0][2];
-      e.adjusted.y = (e.position.x - cameraX) * m[1][0] +
-                     (e.position.y - cameraY) * m[1][1] +
-                     (e.position.z - cameraZ) * m[1][2];
-      e.adjusted.z = (e.position.x - cameraX) * m[2][0] +
-                     (e.position.y - cameraY) * m[2][1] +
-                     (e.position.z - cameraZ) * m[2][2];
+      e.transformed.x = (e.position.x - cameraX) * m[0][0] +
+                        (e.position.y - cameraY) * m[0][1] +
+                        (e.position.z - cameraZ) * m[0][2];
+      e.transformed.y = (e.position.x - cameraX) * m[1][0] +
+                        (e.position.y - cameraY) * m[1][1] +
+                        (e.position.z - cameraZ) * m[1][2];
+      e.transformed.z = (e.position.x - cameraX) * m[2][0] +
+                        (e.position.y - cameraY) * m[2][1] +
+                        (e.position.z - cameraZ) * m[2][2];
       e.visible = true;
 
-      if (e.adjusted.x > drawDistance || e.adjusted.y > drawDistance ||
-          e.adjusted.z > drawDistance || e.adjusted.y < OMEGA) {
+      if (e.transformed.x > drawDistance || e.transformed.y > drawDistance ||
+          e.transformed.z > drawDistance || e.transformed.y < OMEGA) {
         e.visible = false;
         continue;
       }
 
-      e.scale = {5 * SPRITE_SIZE / (e.adjusted.y + OMEGA),
-                 5 * SPRITE_SIZE / (e.adjusted.y + OMEGA)};
+      e.scale = {5 * SPRITE_SIZE / (e.transformed.y + OMEGA),
+                 5 * SPRITE_SIZE / (e.transformed.y + OMEGA)};
 
-      e.projected = {w / 2 - (e.adjusted.x * zoom) / (e.adjusted.y + OMEGA) -
-                         (SPRITE_SIZE / 2) * e.scale.x,
-                     h / 2 + (e.adjusted.z * zoom) / (e.adjusted.y + OMEGA) -
-                         (SPRITE_SIZE / 2) * e.scale.y};
+      e.projected = {
+          w / 2 - (e.transformed.x * zoom) / (e.transformed.y + OMEGA) -
+              (SPRITE_SIZE / 2) * e.scale.x,
+          h / 2 + (e.transformed.z * zoom) / (e.transformed.y + OMEGA) -
+              (SPRITE_SIZE / 2) * e.scale.y};
 
-      e.dSquared = std::pow(e.adjusted.x, 2) + std::pow(e.adjusted.y, 2) +
-                   std::pow(e.adjusted.z, 2);
+      e.dSquared = std::pow(e.transformed.x, 2) + std::pow(e.transformed.y, 2) +
+                   std::pow(e.transformed.z, 2);
     }
   }
 
   void updateQuads() {
-    for (auto& q : quads) {
-      q.outOfRange = std::abs(q.vertices[0].x - cameraX) > drawDistance ||
-                     std::abs(q.vertices[0].y - cameraY) > drawDistance;
+    int levelQuads = quads.size();
+    int totalQuads = levelQuads + playQuads.size();
 
-      if (q.outOfRange) continue;
+    for (int quadCounter = 0; quadCounter < totalQuads; quadCounter++) {
+      quad* q;
+      if (quadCounter < levelQuads) {
+        q = &quads[quadCounter];
+      } else {
+        q = &playQuads[quadCounter - levelQuads];
+        // std::cout << q->vertices[0].x << ", " << q->vertices[0].y << " vs "
+        //        << cameraX << ", " << cameraY << std::endl;
+      }
+
+      q->outOfRange = std::abs(q->vertices[0].x - cameraX) > drawDistance ||
+                      std::abs(q->vertices[0].y - cameraY) > drawDistance;
+
+      if (q->outOfRange) continue;
 
       float maxX = 0;
       float maxY = 0;
       float maxZ = 0;
 
       for (int i = 0; i < 4; i++) {
-        q.adjusted[i].x = (q.vertices[i].x - cameraX) * m[0][0] +
-                          (q.vertices[i].y - cameraY) * m[0][1] +
-                          (q.vertices[i].z - cameraZ) * m[0][2];
-        if (std::abs(q.adjusted[i].x) > maxX) maxX = std::abs(q.adjusted[i].x);
-        q.adjusted[i].y = (q.vertices[i].x - cameraX) * m[1][0] +
-                          (q.vertices[i].y - cameraY) * m[1][1] +
-                          (q.vertices[i].z - cameraZ) * m[1][2];
-        if (std::abs(q.adjusted[i].y) > maxY) maxY = std::abs(q.adjusted[i].y);
-        q.adjusted[i].z = (q.vertices[i].x - cameraX) * m[2][0] +
-                          (q.vertices[i].y - cameraY) * m[2][1] +
-                          (q.vertices[i].z - cameraZ) * m[2][2];
-        if (std::abs(q.adjusted[i].z) > maxZ) maxZ = std::abs(q.adjusted[i].z);
-        q.visible = true;
-        q.cropped = false;
+        q->transformed[i].x = (q->vertices[i].x - cameraX) * m[0][0] +
+                              (q->vertices[i].y - cameraY) * m[0][1] +
+                              (q->vertices[i].z - cameraZ) * m[0][2];
+        if (std::abs(q->transformed[i].x) > maxX)
+          maxX = std::abs(q->transformed[i].x);
+        q->transformed[i].y = (q->vertices[i].x - cameraX) * m[1][0] +
+                              (q->vertices[i].y - cameraY) * m[1][1] +
+                              (q->vertices[i].z - cameraZ) * m[1][2];
+        if (std::abs(q->transformed[i].y) > maxY)
+          maxY = std::abs(q->transformed[i].y);
+        q->transformed[i].z = (q->vertices[i].x - cameraX) * m[2][0] +
+                              (q->vertices[i].y - cameraY) * m[2][1] +
+                              (q->vertices[i].z - cameraZ) * m[2][2];
+        if (std::abs(q->transformed[i].z) > maxZ)
+          maxZ = std::abs(q->transformed[i].z);
+        q->visible = true;
+        q->cropped = false;
 
-        q.partials.clear();
+        q->partials.clear();
       }
 
       if (maxX > drawDistance || maxY > drawDistance || maxZ > drawDistance) {
-        q.visible = false;
+        q->visible = false;
         continue;
       }
 
-      if (!q.wall) {
+      if (!q->wall) {
         int lostCornerCount = 0;
 
         for (int j = 0; j < 4; j++) {
-          if (q.adjusted[j].y < OMEGA) lostCornerCount++;
+          if (q->transformed[j].y < OMEGA) lostCornerCount++;
         }
 
         if (lostCornerCount > 0) {
-          q.visible = false;
+          q->visible = false;
 
           if (lostCornerCount < 4) {
             int n = 0;
             float nY = 0;
             for (int j = 0; j < 4; j++) {
-              if (q.adjusted[j].y > nY) {
-                nY = q.adjusted[j].y;
+              if (q->transformed[j].y > nY) {
+                nY = q->transformed[j].y;
                 n = j;
               }
             }
 
-            float x0 = q.adjusted[n].x;
-            float y0 = q.adjusted[n].y;
-            float z0 = q.adjusted[n].z;
+            float x0 = q->transformed[n].x;
+            float y0 = q->transformed[n].y;
+            float z0 = q->transformed[n].z;
 
-            float x3 = q.adjusted[(n + 2) % 4].x;
-            float y3 = q.adjusted[(n + 2) % 4].y;
-            float z3 = q.adjusted[(n + 2) % 4].z;
+            float x3 = q->transformed[(n + 2) % 4].x;
+            float y3 = q->transformed[(n + 2) % 4].y;
+            float z3 = q->transformed[(n + 2) % 4].z;
 
             float d0 = std::sqrt(std::pow(x3 - x0, 2) + std::pow(y3 - y0, 2));
             float dx0 = (x3 - x0) / d0;
@@ -1499,18 +1521,18 @@ class Olc3d2 : public olc::PixelGameEngine {
             float lambda = (lambdaY - y0) / dy0;
             float lambdaX = x0 + lambda * dx0;
 
-            float x1 = q.adjusted[(n + 1) % 4].x;
-            float y1 = q.adjusted[(n + 1) % 4].y;
-            float z1 = q.adjusted[(n + 1) % 4].z;
+            float x1 = q->transformed[(n + 1) % 4].x;
+            float y1 = q->transformed[(n + 1) % 4].y;
+            float z1 = q->transformed[(n + 1) % 4].z;
             float d1 = std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2) +
                                  std::pow(z1 - z0, 2));
             float dx1 = (x1 - x0) / d1;
             float dy1 = (y1 - y0) / d1;
             float dz1 = (z1 - z0) / d1;
 
-            float x2 = q.adjusted[(n + 3) % 4].x;
-            float y2 = q.adjusted[(n + 3) % 4].y;
-            float z2 = q.adjusted[(n + 3) % 4].z;
+            float x2 = q->transformed[(n + 3) % 4].x;
+            float y2 = q->transformed[(n + 3) % 4].y;
+            float z2 = q->transformed[(n + 3) % 4].z;
             float d2 = std::sqrt(std::pow(x2 - x0, 2) + std::pow(y2 - y0, 2) +
                                  std::pow(z2 - z0, 2));
             float dx2 = (x2 - x0) / d2;
@@ -1571,11 +1593,11 @@ class Olc3d2 : public olc::PixelGameEngine {
               order = {1, 2, 3, 0};
             }
 
-            q.partials.push_back(partial(
+            q->partials.push_back(partial(
                 {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                 {static_cast<int>(u), static_cast<int>(v), static_cast<int>(du),
                  static_cast<int>(dv)},
-                q.colour));
+                q->colour));
 
             if (y1 >= OMEGA) {
               float yTheta = OMEGA;
@@ -1624,11 +1646,11 @@ class Olc3d2 : public olc::PixelGameEngine {
                 order = {1, 2, 3, 0};
               }
 
-              q.partials.push_back(partial(
+              q->partials.push_back(partial(
                   {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                   {static_cast<int>(u), static_cast<int>(v),
                    static_cast<int>(du), static_cast<int>(dv)},
-                  q.colour));
+                  q->colour));
             }
 
             if (y2 >= OMEGA) {
@@ -1680,31 +1702,31 @@ class Olc3d2 : public olc::PixelGameEngine {
                 order = {1, 2, 3, 0};
               }
 
-              q.partials.push_back(partial(
+              q->partials.push_back(partial(
                   {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
                   {static_cast<int>(u), static_cast<int>(v),
                    static_cast<int>(du), static_cast<int>(dv)},
-                  q.colour));
+                  q->colour));
             }
           }
         }
       } else {
-        q.sourcePos.x = 0;
-        q.sourceSize.x = TILE_SIZE;
+        q->sourcePos.x = 0;
+        q->sourceSize.x = TILE_SIZE;
 
         bool cropped[4]{false, false, false, false};
 
         int cropCount = 0;
 
         for (int i = 0; i < 4; i++) {
-          if (q.adjusted[i].y < OMEGA) {
+          if (q->transformed[i].y < OMEGA) {
             cropped[i] = true;
             cropCount++;
           }
         }
 
         if (cropCount > 2) {
-          q.visible = false;
+          q->visible = false;
           continue;
         }
 
@@ -1712,104 +1734,111 @@ class Olc3d2 : public olc::PixelGameEngine {
           int key = -1;
           float lowestY = OMEGA;
           for (int i = 0; i < 4; i++) {
-            if (q.adjusted[i].y < lowestY) {
-              lowestY = q.adjusted[i].y;
+            if (q->transformed[i].y < lowestY) {
+              lowestY = q->transformed[i].y;
               key = i;
             }
           }
 
           if (key == -1) {
-            q.visible = false;
+            q->visible = false;
             continue;
           }
 
-          q.cropped = true;
+          q->cropped = true;
 
-          float keyY = q.adjusted[key].y;
-          float pairY = q.adjusted[q.vertices[key].pair].y;
+          float keyY = q->transformed[key].y;
+          float pairY = q->transformed[q->vertices[key].pair].y;
 
           float delta = 1 - (OMEGA - pairY) / (keyY - pairY);
 
           for (int i = 0; i < 4; i++) {
             if (!cropped[i]) continue;
-            int pair = q.vertices[i].pair;
+            int pair = q->vertices[i].pair;
 
-            q.adjusted[i].x = q.adjusted[i].x +
-                              delta * (q.adjusted[pair].x - q.adjusted[i].x);
+            q->transformed[i].x =
+                q->transformed[i].x +
+                delta * (q->transformed[pair].x - q->transformed[i].x);
 
-            q.adjusted[i].y = q.adjusted[i].y +
-                              delta * (q.adjusted[pair].y - q.adjusted[i].y);
+            q->transformed[i].y =
+                q->transformed[i].y +
+                delta * (q->transformed[pair].y - q->transformed[i].y);
 
-            q.adjusted[i].z = q.adjusted[i].z +
-                              delta * (q.adjusted[pair].z - q.adjusted[i].z);
+            q->transformed[i].z =
+                q->transformed[i].z +
+                delta * (q->transformed[pair].z - q->transformed[i].z);
 
             if (i > pair) {
-              q.sourcePos.x = 0;
-              q.sourceSize.x = TILE_SIZE * (1 - delta);
+              q->sourcePos.x = 0;
+              q->sourceSize.x = TILE_SIZE * (1 - delta);
             } else {
-              q.sourcePos.x = delta * TILE_SIZE;
-              q.sourceSize.x = (1 - delta) * TILE_SIZE;
+              q->sourcePos.x = delta * TILE_SIZE;
+              q->sourceSize.x = (1 - delta) * TILE_SIZE;
             }
           }
         }
       }
 
-      float ax = q.adjusted[1].x - q.adjusted[0].x;
-      float ay = q.adjusted[1].y - q.adjusted[0].y;
-      float az = q.adjusted[1].z - q.adjusted[0].z;
+      float ax = q->transformed[1].x - q->transformed[0].x;
+      float ay = q->transformed[1].y - q->transformed[0].y;
+      float az = q->transformed[1].z - q->transformed[0].z;
 
-      float bx = q.adjusted[3].x - q.adjusted[0].x;
-      float by = q.adjusted[3].y - q.adjusted[0].y;
-      float bz = q.adjusted[3].z - q.adjusted[0].z;
+      float bx = q->transformed[3].x - q->transformed[0].x;
+      float by = q->transformed[3].y - q->transformed[0].y;
+      float bz = q->transformed[3].z - q->transformed[0].z;
 
-      float cx = q.adjusted[0].x + (q.adjusted[3].x - q.adjusted[0].x) / 2 +
-                 (q.adjusted[1].x - q.adjusted[0].x) / 2;
-      float cy = q.adjusted[0].y + (q.adjusted[3].y - q.adjusted[0].y) / 2 +
-                 (q.adjusted[1].y - q.adjusted[0].y) / 2;
-      float cz = q.adjusted[0].z + (q.adjusted[3].z - q.adjusted[0].z) / 2 +
-                 (q.adjusted[1].z - q.adjusted[0].z) / 2;
+      float cx = q->transformed[0].x +
+                 (q->transformed[3].x - q->transformed[0].x) / 2 +
+                 (q->transformed[1].x - q->transformed[0].x) / 2;
+      float cy = q->transformed[0].y +
+                 (q->transformed[3].y - q->transformed[0].y) / 2 +
+                 (q->transformed[1].y - q->transformed[0].y) / 2;
+      float cz = q->transformed[0].z +
+                 (q->transformed[3].z - q->transformed[0].z) / 2 +
+                 (q->transformed[1].z - q->transformed[0].z) / 2;
 
-      q.normal =
+      q->normal =
           vertex(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
-      q.centre = vertex(cx, cy, cz);
+      q->centre = vertex(cx, cy, cz);
 
-      float dotProduct = q.centre.x * q.normal.x + q.centre.y * q.normal.y +
-                         q.centre.z * q.normal.z;
+      float dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
+                         q->centre.z * q->normal.z;
 
-      q.dSquared = std::pow(q.centre.x, 2) + std::pow(q.centre.y, 2) +
-                   std::pow(q.centre.z, 2);
+      q->dSquared = std::pow(q->centre.x, 2) + std::pow(q->centre.y, 2) +
+                    std::pow(q->centre.z, 2);
 
-      if (q.partials.size() == 0) {
-        q.minProjectedX = w;
-        q.minProjectedY = h;
-        q.maxProjectedX = 0;
-        q.maxProjectedY = 0;
+      if (q->partials.size() == 0) {
+        q->minProjectedX = w;
+        q->minProjectedY = h;
+        q->maxProjectedX = 0;
+        q->maxProjectedY = 0;
         for (int i = 0; i < 4; i++) {
-          q.projected[i] = {
-              w / 2 - (q.adjusted[i].x * zoom) / (q.adjusted[i].y + OMEGA),
-              h / 2 + (q.adjusted[i].z * zoom) / (q.adjusted[i].y + OMEGA)};
-          if (q.projected[i].x < q.minProjectedX)
-            q.minProjectedX = q.projected[i].x;
-          if (q.projected[i].y < q.minProjectedY)
-            q.minProjectedY = q.projected[i].y;
-          if (q.projected[i].x > q.maxProjectedX)
-            q.maxProjectedX = q.projected[i].x;
-          if (q.projected[i].y > q.maxProjectedY)
-            q.maxProjectedY = q.projected[i].y;
+          q->projected[i] = {w / 2 - (q->transformed[i].x * zoom) /
+                                         (q->transformed[i].y + OMEGA),
+                             h / 2 + (q->transformed[i].z * zoom) /
+                                         (q->transformed[i].y + OMEGA)};
+          if (q->projected[i].x < q->minProjectedX)
+            q->minProjectedX = q->projected[i].x;
+          if (q->projected[i].y < q->minProjectedY)
+            q->minProjectedY = q->projected[i].y;
+          if (q->projected[i].x > q->maxProjectedX)
+            q->maxProjectedX = q->projected[i].x;
+          if (q->projected[i].y > q->maxProjectedY)
+            q->maxProjectedY = q->projected[i].y;
         }
       } else {
-        for (auto& p : q.partials) {
+        for (auto& p : q->partials) {
           for (int i = 0; i < 4; i++) {
-            p.projected[i].x =
-                w / 2 - (p.adjusted[i].x * zoom) / (p.adjusted[i].y + OMEGA);
-            p.projected[i].y =
-                h / 2 + (p.adjusted[i].z * zoom) / (p.adjusted[i].y + OMEGA);
+            p.projected[i].x = w / 2 - (p.transformed[i].x * zoom) /
+                                           (p.transformed[i].y + OMEGA);
+            p.projected[i].y = h / 2 + (p.transformed[i].z * zoom) /
+                                           (p.transformed[i].y + OMEGA);
           }
         }
       }
 
       if (dotProduct < 0) {
-        q.visible = false;
+        q->visible = false;
       }
     }
   }
@@ -1886,17 +1915,30 @@ class Olc3d2 : public olc::PixelGameEngine {
   void sortQuads() {
     sortedQuads.clear();
 
-    for (auto& quad : quads) {
-      if (quad.outOfRange) continue;
-      if (quad.dSquared > drawDistance * drawDistance) continue;
-      if (quad.cropped && cameraPitch != 0) continue;
-      float fade = 1 - std::sqrt(quad.dSquared) / drawDistance;
+    int levelQuads = quads.size();
+    int totalQuads = levelQuads + playQuads.size();
+
+    for (int quadCounter = 0; quadCounter < totalQuads; quadCounter++) {
+      quad* quadPointer;
+      if (quadCounter < levelQuads) {
+        quadPointer = &quads[quadCounter];
+      } else {
+        quadPointer = &playQuads[quadCounter - levelQuads];
+        // std::cout << "Play quad " << (quadCounter - levelQuads) << ": "
+        //        << quadPointer->dSquared << ", " << std::boolalpha
+        //      << quadPointer->cropped << std::endl;
+      }
+
+      if (quadPointer->outOfRange) continue;
+      if (quadPointer->dSquared > drawDistance * drawDistance) continue;
+      if (quadPointer->cropped && cameraPitch != 0) continue;
+      float fade = 1 - std::sqrt(quadPointer->dSquared) / drawDistance;
       if (fade < 0) continue;
 
       bool inSelection = false;
       bool inPreview = false;
 
-      if (editMode && clipboardPreview) {
+      if (editMode) {
         int x1 =
             selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
         int y1 =
@@ -1906,45 +1948,54 @@ class Olc3d2 : public olc::PixelGameEngine {
         int y2 =
             selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
 
-        inSelection = selectionLive && quad.mapX >= x1 && quad.mapY >= y1 &&
-                      quad.mapX <= x2 && quad.mapY <= y2;
+        inSelection = selectionLive && quadPointer->mapX >= x1 &&
+                      quadPointer->mapY >= y1 && quadPointer->mapX <= x2 &&
+                      quadPointer->mapY <= y2;
 
-        inPreview =
-            cursorRotation == 0 && quad.mapX >= cursorX &&
-                quad.mapX < cursorX + clipboardWidth && quad.mapY >= cursorY &&
-                quad.mapY < cursorY + clipboardHeight ||
-            cursorRotation == 1 && quad.mapX >= cursorX &&
-                quad.mapX < cursorX + clipboardHeight && quad.mapY >= cursorY &&
-                quad.mapY < cursorY + clipboardWidth ||
-            cursorRotation == 2 && quad.mapX <= cursorX &&
-                quad.mapY >= cursorY && quad.mapX > cursorX - clipboardHeight &&
-                quad.mapY < cursorY + clipboardWidth ||
-            cursorRotation == 3 && quad.mapX <= cursorX &&
-                quad.mapX > cursorX - clipboardWidth && quad.mapY >= cursorY &&
-                quad.mapY < cursorY + clipboardHeight ||
-            cursorRotation == 4 && quad.mapX <= cursorX &&
-                quad.mapY <= cursorY && quad.mapX > cursorX - clipboardWidth &&
-                quad.mapY > cursorY - clipboardHeight ||
-            cursorRotation == 5 && quad.mapX <= cursorX &&
-                quad.mapY <= cursorY && quad.mapX > cursorX - clipboardHeight &&
-                quad.mapY > cursorY - clipboardWidth ||
-            cursorRotation == 6 && quad.mapX >= cursorX &&
-                quad.mapX < cursorX + clipboardHeight && quad.mapY <= cursorY &&
-                quad.mapY > cursorY - clipboardWidth ||
-            cursorRotation == 7 && quad.mapX >= cursorX &&
-                quad.mapY <= cursorY && quad.mapX < cursorX + clipboardWidth &&
-                quad.mapY > cursorY - clipboardHeight;
+        inPreview = cursorRotation == 0 && quadPointer->mapX >= cursorX &&
+                        quadPointer->mapX < cursorX + clipboardWidth &&
+                        quadPointer->mapY >= cursorY &&
+                        quadPointer->mapY < cursorY + clipboardHeight ||
+                    cursorRotation == 1 && quadPointer->mapX >= cursorX &&
+                        quadPointer->mapX < cursorX + clipboardHeight &&
+                        quadPointer->mapY >= cursorY &&
+                        quadPointer->mapY < cursorY + clipboardWidth ||
+                    cursorRotation == 2 && quadPointer->mapX <= cursorX &&
+                        quadPointer->mapY >= cursorY &&
+                        quadPointer->mapX > cursorX - clipboardHeight &&
+                        quadPointer->mapY < cursorY + clipboardWidth ||
+                    cursorRotation == 3 && quadPointer->mapX <= cursorX &&
+                        quadPointer->mapX > cursorX - clipboardWidth &&
+                        quadPointer->mapY >= cursorY &&
+                        quadPointer->mapY < cursorY + clipboardHeight ||
+                    cursorRotation == 4 && quadPointer->mapX <= cursorX &&
+                        quadPointer->mapY <= cursorY &&
+                        quadPointer->mapX > cursorX - clipboardWidth &&
+                        quadPointer->mapY > cursorY - clipboardHeight ||
+                    cursorRotation == 5 && quadPointer->mapX <= cursorX &&
+                        quadPointer->mapY <= cursorY &&
+                        quadPointer->mapX > cursorX - clipboardHeight &&
+                        quadPointer->mapY > cursorY - clipboardWidth ||
+                    cursorRotation == 6 && quadPointer->mapX >= cursorX &&
+                        quadPointer->mapX < cursorX + clipboardHeight &&
+                        quadPointer->mapY <= cursorY &&
+                        quadPointer->mapY > cursorY - clipboardWidth ||
+                    cursorRotation == 7 && quadPointer->mapX >= cursorX &&
+                        quadPointer->mapY <= cursorY &&
+                        quadPointer->mapX < cursorX + clipboardWidth &&
+                        quadPointer->mapY > cursorY - clipboardHeight;
       }
 
-      if (inPreview) {
-        quad.colour = olc::Pixel(255, 64, 255);
+      if (clipboardPreview && inPreview) {
+        quadPointer->colour = olc::Pixel(255, 64, 255);
       } else if (inSelection) {
-        quad.colour = olc::Pixel(64, 255, 255);
-      } else if (editMode && cursorX == quad.mapX && cursorY == quad.mapY) {
+        quadPointer->colour = olc::Pixel(64, 255, 255);
+      } else if (editMode && cursorX == quadPointer->mapX &&
+                 cursorY == quadPointer->mapY) {
         if (day) {
-          quad.colour = olc::Pixel(128, 128, 255);
+          quadPointer->colour = olc::Pixel(128, 128, 255);
         } else {
-          quad.colour = olc::Pixel(255, 255, 128);
+          quadPointer->colour = olc::Pixel(255, 255, 128);
         }
       } else {
         if (day) {
@@ -1953,14 +2004,14 @@ class Olc3d2 : public olc::PixelGameEngine {
             alpha = static_cast<int>(255.0f * 4 * fade);
           }
           int rgb = static_cast<int>(128 + 128 * std::pow(fade, 2));
-          quad.colour = olc::Pixel(rgb, rgb, rgb, alpha);
+          quadPointer->colour = olc::Pixel(rgb, rgb, rgb, alpha);
         } else {
           int rgb = static_cast<int>(255.0f * std::pow(fade, 2));
-          quad.colour = olc::Pixel(rgb, rgb, rgb);
+          quadPointer->colour = olc::Pixel(rgb, rgb, rgb);
         }
       }
 
-      sortedQuads.push_back(&quad);
+      sortedQuads.push_back(quadPointer);
     }
 
     std::sort(sortedQuads.begin(), sortedQuads.end(),
@@ -2011,36 +2062,44 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     int e = 0;
 
-    for (auto& q : sortedQuads) {
+    for (auto* q : sortedQuads) {
       while (e < sortedEntities.size() &&
              sortedEntities[e]->dSquared > q->dSquared) {
         auto E = sortedEntities[e];
 
         if (E->visible) {
-          DrawDecal(E->projected, E->renderable->decal, E->scale, E->colour);
+          DrawDecal(E->projected, E->renderable->Decal(), E->scale, E->colour);
           eCount++;
         }
 
         e++;
       }
 
-      float dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
-                         q->centre.z * q->normal.z;
+      if (q->renderable == nullptr) {
+        DrawWarpedDecal(plasma.Decal(), q->projected, olc::RED);
 
-      auto decal = q->renderable->decal;
+        // std::cout << "Plasma" << std::endl;
 
-      if (dotProduct > 0) {
-        if (q->partials.size() > 0) {
-          for (auto& p : q->partials) {
-            DrawPartialWarpedDecal(decal, p.projected, p.sourcePos,
-                                   p.sourceSize, p.colour);
+      } else {
+        float dotProduct = q->centre.x * q->normal.x +
+                           q->centre.y * q->normal.y +
+                           q->centre.z * q->normal.z;
+
+        auto decal = q->renderable->Decal();
+
+        if (dotProduct > 0) {
+          if (q->partials.size() > 0) {
+            for (auto& p : q->partials) {
+              DrawPartialWarpedDecal(decal, p.projected, p.sourcePos,
+                                     p.sourceSize, p.colour);
+              qCount++;
+            }
+          }
+          if (q->visible) {
+            DrawPartialWarpedDecal(decal, q->projected, q->sourcePos,
+                                   q->sourceSize, q->colour);
             qCount++;
           }
-        }
-        if (q->visible) {
-          DrawPartialWarpedDecal(decal, q->projected, q->sourcePos,
-                                 q->sourceSize, q->colour);
-          qCount++;
         }
       }
     }
@@ -2106,7 +2165,7 @@ class Olc3d2 : public olc::PixelGameEngine {
         if (k >= 176) continue;
         DrawDecal({static_cast<float>(i * (TILE_SIZE + 10) + 10),
                    static_cast<float>(j * (TILE_SIZE + 10) + 10)},
-                  texture[k].decal, {1, 1},
+                  texture[k].Decal(), {1, 1},
                   k == selectedTexture ? olc::WHITE : olc::GREY);
       }
     }
@@ -2188,8 +2247,8 @@ class Olc3d2 : public olc::PixelGameEngine {
         if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
           renderTileSelector();
         } else {
-          DrawDecal({w / 2 - TILE_SIZE / 2, 10}, texture[selectedTexture].decal,
-                    {1, 1});
+          DrawDecal({w / 2 - TILE_SIZE / 2, 10},
+                    texture[selectedTexture].Decal(), {1, 1});
         }
         if (showHelp) renderHelp();
       }
