@@ -89,7 +89,7 @@ struct quad {
   float maxProjectedY;
   std::vector<partial> partials;
   vertex normal;
-  vertex closest;
+  vertex centre;
   olc::Pixel colour;
   int mapX;
   int mapY;
@@ -809,6 +809,10 @@ class Olc3d2 : public olc::PixelGameEngine {
       playQuads.clear();
       editMode = true;
       return;
+    }
+
+    if (GetKey(olc::Key::Q).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+      exitSignal = true;
     }
 
     if (GetKey(olc::Key::N).bPressed && GetKey(olc::Key::CTRL).bHeld) {
@@ -1766,10 +1770,10 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (cropCount > 0) {
           int key = -1;
-          float lowestY = OMEGA;
+          float highestY = OMEGA;
           for (int i = 0; i < 4; i++) {
-            if (q->transformed[i].y < lowestY) {
-              lowestY = q->transformed[i].y;
+            if (q->transformed[i].y < highestY) {
+              highestY = q->transformed[i].y;
               key = i;
             }
           }
@@ -1821,25 +1825,26 @@ class Olc3d2 : public olc::PixelGameEngine {
       float by = q->transformed[3].y - q->transformed[0].y;
       float bz = q->transformed[3].z - q->transformed[0].z;
 
-      float lowestY = drawDistance;
+      q->centre.x = 0;
+      q->centre.y = 0;
+      q->centre.z = 0;
       for (int i = 0; i < 4; i++) {
-        if (q->transformed[i].y < lowestY) {
-          q->closest.x = q->transformed[i].x;
-          q->closest.y = q->transformed[i].y;
-          q->closest.z = q->transformed[i].z;
-          lowestY = q->closest.y;
-        }
+        q->centre.x += q->transformed[i].x;
+        q->centre.y += q->transformed[i].y;
+        q->centre.z += q->transformed[i].z;
       }
+      q->centre.x /= 4;
+      q->centre.y /= 4;
+      q->centre.z /= 4;
 
       q->normal =
           vertex(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
 
-      float dotProduct = q->closest.x * q->normal.x +
-                         q->closest.y * q->normal.y +
-                         q->closest.z * q->normal.z;
+      float dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
+                         q->centre.z * q->normal.z;
 
-      q->dSquared = std::pow(q->closest.x, 2) + std::pow(q->closest.y, 2) +
-                    std::pow(q->closest.z, 2);
+      q->dSquared = std::pow(q->centre.x, 2) + std::pow(q->centre.y, 2) +
+                    std::pow(q->centre.z, 2);
 
       if (q->partials.size() == 0) {
         q->minProjectedX = w;
@@ -2115,14 +2120,16 @@ class Olc3d2 : public olc::PixelGameEngine {
       }
 
       if (q->renderable == nullptr) {
-        DrawWarpedDecal(plasma.Decal(), q->projected, olc::RED);
+        SetDecalMode(olc::DecalMode::ADDITIVE);
+        DrawWarpedDecal(plasma.Decal(), q->projected, olc::Pixel(255, 0, 0));
 
+        SetDecalMode(olc::DecalMode::NORMAL);
         // std::cout << "Plasma" << std::endl;
 
       } else {
-        float dotProduct = q->closest.x * q->normal.x +
-                           q->closest.y * q->normal.y +
-                           q->closest.z * q->normal.z;
+        float dotProduct = q->centre.x * q->normal.x +
+                           q->centre.y * q->normal.y +
+                           q->centre.z * q->normal.z;
 
         auto decal = q->renderable->Decal();
 
