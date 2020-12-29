@@ -89,7 +89,7 @@ struct quad {
   float maxProjectedY;
   std::vector<partial> partials;
   vertex normal;
-  vertex centre;
+  vertex closest;
   olc::Pixel colour;
   int mapX;
   int mapY;
@@ -710,7 +710,8 @@ class Olc3d2 : public olc::PixelGameEngine {
   float cameraY = unit / 2;
   float cameraZ = unit / 2;
 
-  float lastCameraX, lastCameraY, lastCameraAngle;
+  float playerX, playerY, playerZ, playerAngle;
+  float lastPlayerX, lastPlayerY;
 
   olc::vi2d mousePos;
   olc::vi2d lastMousePos;
@@ -754,6 +755,50 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
   }
 
+  void playProcessing(float frameLength) {
+    cameraX = playerX - 2 * unit * std::sin(playerAngle);
+    cameraY = playerY - 2 * unit * std::cos(playerAngle);
+    cameraZ = playerZ - unit;
+    cameraAngle = playerAngle;
+
+    float myX = playerX / unit;
+    float myY = playerY / unit;
+
+    float x1 = unit * (myX - 0.25);
+    float y1 = unit * (myY - 0.25);
+    float x2 = x1 + unit / 2;
+    float y2 = y1;
+    float x4 = x1;
+    float y4 = y1 + unit / 2;
+    float x3 = x1 + (x2 - x1) + (x4 - x1);
+    float y3 = y1 + (y2 - y1) + (y4 - y1);
+
+    float zTop = 0;
+    float zBottom = unit;
+
+    playQuads.clear();
+
+    playQuads.push_back(quad(vertex(x1, y1, zTop, -1), vertex(x2, y2, zTop, -1),
+                             vertex(x3, y3, zTop, -1),
+                             vertex(x4, y4, zTop, -1)));
+
+    playQuads.push_back(quad(vertex(x2, y2, zBottom, 3),
+                             vertex(x2, y2, zTop, 2), vertex(x1, y1, zTop, 1),
+                             vertex(x1, y1, zBottom, 0)));
+
+    playQuads.push_back(quad(vertex(x3, y3, zBottom, 3),
+                             vertex(x3, y3, zTop, 2), vertex(x2, y2, zTop, 1),
+                             vertex(x2, y2, zBottom, 0)));
+
+    playQuads.push_back(quad(vertex(x4, y4, zBottom, 3),
+                             vertex(x4, y4, zTop, 2), vertex(x3, y3, zTop, 1),
+                             vertex(x3, y3, zBottom, 0)));
+
+    playQuads.push_back(quad(vertex(x1, y1, zBottom, 3),
+                             vertex(x1, y1, zTop, 2), vertex(x4, y4, zTop, 1),
+                             vertex(x4, y4, zBottom, 0)));
+  }
+
   void handlePlayInputs(float frameLength) {
     if (GetKey(olc::Key::P).bPressed && GetKey(olc::Key::CTRL).bHeld) {
       cameraAngle = editCameraAngle;
@@ -763,6 +808,34 @@ class Olc3d2 : public olc::PixelGameEngine {
       cameraZ = editCameraZ;
       playQuads.clear();
       editMode = true;
+      return;
+    }
+
+    if (GetKey(olc::Key::N).bPressed && GetKey(olc::Key::CTRL).bHeld) {
+      noClip = !noClip;
+    }
+
+    lastPlayerX = playerX;
+    lastPlayerY = playerY;
+
+    if (GetKey(olc::Key::LEFT).bHeld) playerAngle += 2 * frameLength;
+    if (GetKey(olc::Key::RIGHT).bHeld) playerAngle -= 2 * frameLength;
+
+    if (GetKey(olc::Key::W).bHeld) {
+      playerX += std::sin(playerAngle) * unit * 2 * frameLength;
+      playerY += std::cos(playerAngle) * unit * 2 * frameLength;
+    }
+    if (GetKey(olc::Key::S).bHeld) {
+      playerX -= std::sin(playerAngle) * unit * 2 * frameLength;
+      playerY -= std::cos(playerAngle) * unit * 2 * frameLength;
+    }
+    if (GetKey(olc::Key::A).bHeld) {
+      playerX += std::cos(playerAngle) * unit * 2 * frameLength;
+      playerY += -std::sin(playerAngle) * unit * 2 * frameLength;
+    }
+    if (GetKey(olc::Key::D).bHeld) {
+      playerX -= std::cos(playerAngle) * unit * 2 * frameLength;
+      playerY -= -std::sin(playerAngle) * unit * 2 * frameLength;
     }
   }
 
@@ -775,46 +848,15 @@ class Olc3d2 : public olc::PixelGameEngine {
       editCameraX = cameraX;
       editCameraY = cameraY;
       editCameraZ = cameraZ;
-      editMode = false;
-      playQuads.clear();
+
+      playerX = cameraX;
+      playerY = cameraY;
+      playerZ = cameraZ;
+      playerAngle = cameraAngle;
 
       cameraPitch = 0.6;
-      cameraZ = -unit;
 
-      float myX = cameraX / unit + 3.0f * std::sin(cameraAngle);
-      float myY = cameraY / unit + 3.0f * std::cos(cameraAngle);
-
-      float x1 = unit * (myX + 0.25);
-      float y1 = unit * (myY + 0.25);
-      float x2 = x1 + unit / 2;
-      float y2 = y1;
-      float x4 = x1;
-      float y4 = y1 + unit / 2;
-      float x3 = x1 + (x2 - x1) + (x4 - x1);
-      float y3 = y1 + (y2 - y1) + (y4 - y1);
-
-      float zTop = 0;
-      float zBottom = unit;
-
-      playQuads.push_back(
-          quad(vertex(x1, y1, zTop, -1), vertex(x2, y2, zTop, -1),
-               vertex(x3, y3, zTop, -1), vertex(x4, y4, zTop, -1)));
-
-      playQuads.push_back(quad(vertex(x2, y2, zBottom, 3),
-                               vertex(x2, y2, zTop, 2), vertex(x1, y1, zTop, 1),
-                               vertex(x1, y1, zBottom, 0)));
-
-      playQuads.push_back(quad(vertex(x3, y3, zBottom, 3),
-                               vertex(x3, y3, zTop, 2), vertex(x2, y2, zTop, 1),
-                               vertex(x2, y2, zBottom, 0)));
-
-      playQuads.push_back(quad(vertex(x4, y4, zBottom, 3),
-                               vertex(x4, y4, zTop, 2), vertex(x3, y3, zTop, 1),
-                               vertex(x3, y3, zBottom, 0)));
-
-      playQuads.push_back(quad(vertex(x1, y1, zBottom, 3),
-                               vertex(x1, y1, zTop, 2), vertex(x4, y4, zTop, 1),
-                               vertex(x4, y4, zBottom, 0)));
+      editMode = false;
     }
 
     if (GetMouse(2).bHeld || GetKey(olc::Key::OEM_5).bHeld) {
@@ -986,10 +1028,6 @@ class Olc3d2 : public olc::PixelGameEngine {
             u = undoBuffer.back();
           }
           regenerateQuads();
-        }
-
-        if (GetKey(olc::Key::N).bPressed) {
-          noClip = !noClip;
         }
 
         if (GetKey(olc::Key::E).bPressed) {
@@ -1258,10 +1296,6 @@ class Olc3d2 : public olc::PixelGameEngine {
       if (cameraPitch < -1.571) cameraPitch = -1.571;
       if (cameraPitch > 1.571) cameraPitch = 1.571;
 
-      lastCameraX = cameraX;
-      lastCameraY = cameraY;
-      lastCameraAngle = cameraAngle;
-
       if (!GetKey(olc::Key::CTRL).bHeld) {
         if (GetKey(olc::Key::W).bHeld) {
           cameraX += std::sin(cameraAngle) * unit * 2 * frameLength;
@@ -1283,16 +1317,16 @@ class Olc3d2 : public olc::PixelGameEngine {
     }
   }
 
-  void handleInteractions() {
-    int mapX = cameraX / unit + mazeWidth;
-    int mapY = cameraY / unit + mazeHeight;
+  void handlePlayerInteractions() {
+    int mapX = playerX / unit + mazeWidth;
+    int mapY = playerY / unit + mazeHeight;
 
     int mapZ = 0;
-    if (cameraZ < -5 * unit / 2 || cameraZ > unit / 2)
+    if (playerZ < -5 * unit / 2 || playerZ > unit / 2)
       return;
-    else if (cameraZ < -3 * unit / 2)
+    else if (playerZ < -3 * unit / 2)
       mapZ = 2;
-    else if (cameraZ < -unit / 2)
+    else if (playerZ < -unit / 2)
       mapZ = 1;
 
     uint8_t INTERACTION_BIT;
@@ -1308,8 +1342,8 @@ class Olc3d2 : public olc::PixelGameEngine {
         break;
     }
 
-    float dx = cameraX - lastCameraX;
-    float dy = cameraY - lastCameraY;
+    float dx = playerX - lastPlayerX;
+    float dy = playerY - lastPlayerY;
 
     if (mapX > 0 && mapY > 0 && mapX < mazeWidth * 2 + 1 &&
         mapY < mazeWidth * 2 + 1) {
@@ -1318,8 +1352,8 @@ class Olc3d2 : public olc::PixelGameEngine {
            southWest = false;
 
       double intBit;
-      float eastWest = std::modf(cameraX / unit + mazeWidth - mapX, &intBit);
-      float northSouth = std::modf(cameraY / unit + mazeHeight - mapY, &intBit);
+      float eastWest = std::modf(playerX / unit + mazeWidth - mapX, &intBit);
+      float northSouth = std::modf(playerY / unit + mazeHeight - mapY, &intBit);
 
       east = map[mapX - 1][mapY].type & INTERACTION_BIT;
       west = map[mapX + 1][mapY].type & INTERACTION_BIT;
@@ -1335,12 +1369,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           northEast) {
         if (dx < 0 && dy < 0) {
           if (-dx > -dy)
-            cameraX = (mapX + 0.25 - mazeWidth) * unit;
+            playerX = (mapX + 0.25 - mazeWidth) * unit;
           else
-            cameraY = (mapY + 0.25 - mazeHeight) * unit;
+            playerY = (mapY + 0.25 - mazeHeight) * unit;
         } else {
-          if (dx < 0) cameraX = (mapX + 0.25 - mazeWidth) * unit;
-          if (dy < 0) cameraY = (mapY + 0.25 - mazeHeight) * unit;
+          if (dx < 0) playerX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy < 0) playerY = (mapY + 0.25 - mazeHeight) * unit;
         }
       }
 
@@ -1348,12 +1382,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           northWest) {
         if (dx > 0 && dy < 0) {
           if (dx > -dy)
-            cameraX = (mapX + 0.75 - mazeWidth) * unit;
+            playerX = (mapX + 0.75 - mazeWidth) * unit;
           else
-            cameraY = (mapY + 0.25 - mazeHeight) * unit;
+            playerY = (mapY + 0.25 - mazeHeight) * unit;
         } else {
-          if (dx > 0) cameraX = (mapX + 0.75 - mazeWidth) * unit;
-          if (dy < 0) cameraY = (mapY + 0.25 - mazeHeight) * unit;
+          if (dx > 0) playerX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy < 0) playerY = (mapY + 0.25 - mazeHeight) * unit;
         }
       }
 
@@ -1361,12 +1395,12 @@ class Olc3d2 : public olc::PixelGameEngine {
           southEast) {
         if (dx < 0 && dy > 0) {
           if (-dx < dy)
-            cameraX = (mapX + 0.25 - mazeWidth) * unit;
+            playerX = (mapX + 0.25 - mazeWidth) * unit;
           else
-            cameraY = (mapY + 0.75 - mazeHeight) * unit;
+            playerY = (mapY + 0.75 - mazeHeight) * unit;
         } else {
-          if (dx < 0) cameraX = (mapX + 0.25 - mazeWidth) * unit;
-          if (dy > 0) cameraY = (mapY + 0.75 - mazeHeight) * unit;
+          if (dx < 0) playerX = (mapX + 0.25 - mazeWidth) * unit;
+          if (dy > 0) playerY = (mapY + 0.75 - mazeHeight) * unit;
         }
       }
 
@@ -1374,26 +1408,26 @@ class Olc3d2 : public olc::PixelGameEngine {
           southWest) {
         if (dx > 0 && dy > 0) {
           if (dx > dy)
-            cameraX = (mapX + 0.75 - mazeWidth) * unit;
+            playerX = (mapX + 0.75 - mazeWidth) * unit;
           else
-            cameraY = (mapY + 0.75 - mazeHeight) * unit;
+            playerY = (mapY + 0.75 - mazeHeight) * unit;
         } else {
-          if (dx > 0) cameraX = (mapX + 0.75 - mazeWidth) * unit;
-          if (dy > 0) cameraY = (mapY + 0.75 - mazeHeight) * unit;
+          if (dx > 0) playerX = (mapX + 0.75 - mazeWidth) * unit;
+          if (dy > 0) playerY = (mapY + 0.75 - mazeHeight) * unit;
         }
       }
 
-      eastWest = std::modf(cameraX / unit + mazeWidth - mapX, &intBit);
-      northSouth = std::modf(cameraY / unit + mazeHeight - mapY, &intBit);
+      eastWest = std::modf(playerX / unit + mazeWidth - mapX, &intBit);
+      northSouth = std::modf(playerY / unit + mazeHeight - mapY, &intBit);
 
       if (northSouth < 0.25 && north && dy < 0)
-        cameraY = (mapY + 0.25 - mazeHeight) * unit;
+        playerY = (mapY + 0.25 - mazeHeight) * unit;
       if (northSouth > 0.75 && south && dy > 0)
-        cameraY = (mapY + 0.75 - mazeHeight) * unit;
+        playerY = (mapY + 0.75 - mazeHeight) * unit;
       if (eastWest < 0.25 && east && dx < 0)
-        cameraX = (mapX + 0.25 - mazeWidth) * unit;
+        playerX = (mapX + 0.25 - mazeWidth) * unit;
       if (eastWest > 0.75 && west && dx > 0)
-        cameraX = (mapX + 0.75 - mazeWidth) * unit;
+        playerX = (mapX + 0.75 - mazeWidth) * unit;
     }
   }
 
@@ -1787,25 +1821,25 @@ class Olc3d2 : public olc::PixelGameEngine {
       float by = q->transformed[3].y - q->transformed[0].y;
       float bz = q->transformed[3].z - q->transformed[0].z;
 
-      float cx = q->transformed[0].x +
-                 (q->transformed[3].x - q->transformed[0].x) / 2 +
-                 (q->transformed[1].x - q->transformed[0].x) / 2;
-      float cy = q->transformed[0].y +
-                 (q->transformed[3].y - q->transformed[0].y) / 2 +
-                 (q->transformed[1].y - q->transformed[0].y) / 2;
-      float cz = q->transformed[0].z +
-                 (q->transformed[3].z - q->transformed[0].z) / 2 +
-                 (q->transformed[1].z - q->transformed[0].z) / 2;
+      float lowestY = drawDistance;
+      for (int i = 0; i < 4; i++) {
+        if (q->transformed[i].y < lowestY) {
+          q->closest.x = q->transformed[i].x;
+          q->closest.y = q->transformed[i].y;
+          q->closest.z = q->transformed[i].z;
+          lowestY = q->closest.y;
+        }
+      }
 
       q->normal =
           vertex(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
-      q->centre = vertex(cx, cy, cz);
 
-      float dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
-                         q->centre.z * q->normal.z;
+      float dotProduct = q->closest.x * q->normal.x +
+                         q->closest.y * q->normal.y +
+                         q->closest.z * q->normal.z;
 
-      q->dSquared = std::pow(q->centre.x, 2) + std::pow(q->centre.y, 2) +
-                    std::pow(q->centre.z, 2);
+      q->dSquared = std::pow(q->closest.x, 2) + std::pow(q->closest.y, 2) +
+                    std::pow(q->closest.z, 2);
 
       if (q->partials.size() == 0) {
         q->minProjectedX = w;
@@ -1924,9 +1958,6 @@ class Olc3d2 : public olc::PixelGameEngine {
         quadPointer = &quads[quadCounter];
       } else {
         quadPointer = &playQuads[quadCounter - levelQuads];
-        // std::cout << "Play quad " << (quadCounter - levelQuads) << ": "
-        //        << quadPointer->dSquared << ", " << std::boolalpha
-        //      << quadPointer->cropped << std::endl;
       }
 
       if (quadPointer->outOfRange) continue;
@@ -1937,6 +1968,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
       bool inSelection = false;
       bool inPreview = false;
+      bool isPlayer = false;
 
       if (editMode) {
         int x1 =
@@ -1984,9 +2016,16 @@ class Olc3d2 : public olc::PixelGameEngine {
                         quadPointer->mapY <= cursorY &&
                         quadPointer->mapX < cursorX + clipboardWidth &&
                         quadPointer->mapY > cursorY - clipboardHeight;
+      } else {
+        int mapX = playerX / unit + mazeWidth;
+        int mapY = playerY / unit + mazeHeight;
+
+        isPlayer = quadPointer->mapX == mapX && quadPointer->mapY == mapY;
       }
 
-      if (clipboardPreview && inPreview) {
+      if (isPlayer) {
+        quadPointer->colour = olc::Pixel(64, 255, 64);
+      } else if (clipboardPreview && inPreview) {
         quadPointer->colour = olc::Pixel(255, 64, 255);
       } else if (inSelection) {
         quadPointer->colour = olc::Pixel(64, 255, 255);
@@ -2081,9 +2120,9 @@ class Olc3d2 : public olc::PixelGameEngine {
         // std::cout << "Plasma" << std::endl;
 
       } else {
-        float dotProduct = q->centre.x * q->normal.x +
-                           q->centre.y * q->normal.y +
-                           q->centre.z * q->normal.z;
+        float dotProduct = q->closest.x * q->normal.x +
+                           q->closest.y * q->normal.y +
+                           q->closest.z * q->normal.z;
 
         auto decal = q->renderable->Decal();
 
@@ -2127,8 +2166,7 @@ class Olc3d2 : public olc::PixelGameEngine {
                      << "Wall: " << (quad::cursorQuad->wall ? "True" : "False")
                      << ", Level: " << quad::cursorQuad->level
                      << ", Direction: " << quad::cursorQuad->direction
-                     << (autoTexture ? " [Auto]" : "")
-                     << (noClip ? " [Noclip]" : "") << std::endl;
+                     << (autoTexture ? " [Auto]" : "") << std::endl;
       }
 
       if (clipboardWidth > -1 && clipboardHeight > -1) {
@@ -2221,11 +2259,12 @@ class Olc3d2 : public olc::PixelGameEngine {
       handleEditInputs(fElapsedTime);
     } else {
       handlePlayInputs(fElapsedTime);
+      playProcessing(fElapsedTime);
     }
 
     updateMatrix();
 
-    if (!noClip) handleInteractions();
+    if (!editMode && !noClip) handlePlayerInteractions();
 
     updateQuads();
     updateEntities();
