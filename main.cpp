@@ -131,7 +131,6 @@ struct quad {
 quad* quad::cursorQuad = nullptr;
 
 std::vector<quad> quads;
-std::vector<quad> playQuads;
 std::vector<quad*> sortedQuads;
 
 struct entity {
@@ -760,43 +759,6 @@ class Olc3d2 : public olc::PixelGameEngine {
     cameraY = playerY - 2 * unit * std::cos(playerAngle);
     cameraZ = playerZ - unit;
     cameraAngle = playerAngle;
-
-    float myX = playerX / unit;
-    float myY = playerY / unit;
-
-    float x1 = unit * (myX - 0.25);
-    float y1 = unit * (myY - 0.25);
-    float x2 = x1 + unit / 2;
-    float y2 = y1;
-    float x4 = x1;
-    float y4 = y1 + unit / 2;
-    float x3 = x1 + (x2 - x1) + (x4 - x1);
-    float y3 = y1 + (y2 - y1) + (y4 - y1);
-
-    float zTop = 0;
-    float zBottom = unit;
-
-    playQuads.clear();
-
-    playQuads.push_back(quad(vertex(x1, y1, zTop, -1), vertex(x2, y2, zTop, -1),
-                             vertex(x3, y3, zTop, -1),
-                             vertex(x4, y4, zTop, -1)));
-
-    playQuads.push_back(quad(vertex(x2, y2, zBottom, 3),
-                             vertex(x2, y2, zTop, 2), vertex(x1, y1, zTop, 1),
-                             vertex(x1, y1, zBottom, 0)));
-
-    playQuads.push_back(quad(vertex(x3, y3, zBottom, 3),
-                             vertex(x3, y3, zTop, 2), vertex(x2, y2, zTop, 1),
-                             vertex(x2, y2, zBottom, 0)));
-
-    playQuads.push_back(quad(vertex(x4, y4, zBottom, 3),
-                             vertex(x4, y4, zTop, 2), vertex(x3, y3, zTop, 1),
-                             vertex(x3, y3, zBottom, 0)));
-
-    playQuads.push_back(quad(vertex(x1, y1, zBottom, 3),
-                             vertex(x1, y1, zTop, 2), vertex(x4, y4, zTop, 1),
-                             vertex(x4, y4, zBottom, 0)));
   }
 
   void handlePlayInputs(float frameLength) {
@@ -806,7 +768,6 @@ class Olc3d2 : public olc::PixelGameEngine {
       cameraX = editCameraX;
       cameraY = editCameraY;
       cameraZ = editCameraZ;
-      playQuads.clear();
       editMode = true;
       return;
     }
@@ -1475,17 +1436,10 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   void updateQuads() {
     int levelQuads = quads.size();
-    int totalQuads = levelQuads + playQuads.size();
 
-    for (int quadCounter = 0; quadCounter < totalQuads; quadCounter++) {
-      quad* q;
-      if (quadCounter < levelQuads) {
-        q = &quads[quadCounter];
-      } else {
-        q = &playQuads[quadCounter - levelQuads];
-        // std::cout << q->vertices[0].x << ", " << q->vertices[0].y << " vs "
-        //        << cameraX << ", " << cameraY << std::endl;
-      }
+    for (int quadCounter = 0; quadCounter < quads.size(); quadCounter++) {
+      quad* q = &quads[quadCounter];
+      
 
       q->outOfRange = std::abs(q->vertices[0].x - cameraX) > drawDistance ||
                       std::abs(q->vertices[0].y - cameraY) > drawDistance;
@@ -1954,16 +1908,8 @@ class Olc3d2 : public olc::PixelGameEngine {
   void sortQuads() {
     sortedQuads.clear();
 
-    int levelQuads = quads.size();
-    int totalQuads = levelQuads + playQuads.size();
-
-    for (int quadCounter = 0; quadCounter < totalQuads; quadCounter++) {
-      quad* quadPointer;
-      if (quadCounter < levelQuads) {
-        quadPointer = &quads[quadCounter];
-      } else {
-        quadPointer = &playQuads[quadCounter - levelQuads];
-      }
+    for (int quadCounter = 0; quadCounter < quads.size(); quadCounter++) {
+      quad* quadPointer = &quads[quadCounter];
 
       if (quadPointer->outOfRange) continue;
       if (quadPointer->dSquared > drawDistance * drawDistance) continue;
