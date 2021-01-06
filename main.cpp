@@ -31,13 +31,12 @@ const uint8_t HIGH_ROOM_SINGLE_BLOCK = 0b10011;
 const uint8_t HIGH_ROOM_FLOATING_BLOCK = 0b10101;
 const uint8_t HIGH_ROOM_DOUBLE_BLOCK = 0b10111;
 
-const uint8_t GENERATOR_WALL = WALL;
-const uint8_t GENERATOR_PATH = CORRIDOR;
-const uint8_t GENERATOR_ROOM = HIGH_ROOM;
+const uint8_t GENERATOR_WALL = SKY_SINGLE_BLOCK;
+const uint8_t GENERATOR_PATH = SKY;
+const uint8_t GENERATOR_ROOM = SKY;
 
 olc::Renderable texture[176];
 olc::Renderable sprite[50];
-olc::Renderable plasma;
 
 struct vertex {
   float x;
@@ -694,8 +693,6 @@ class Olc3d2 : public olc::PixelGameEngine {
       sprite[i].Load(filename.str());
     }
 
-    plasma.Load("plamsa.png");
-
     std::srand(std::time(nullptr));
     loadLevel();
     makeEntities(1000);
@@ -755,9 +752,9 @@ class Olc3d2 : public olc::PixelGameEngine {
   }
 
   void playProcessing(float frameLength) {
-    cameraX = playerX - 2 * unit * std::sin(playerAngle);
-    cameraY = playerY - 2 * unit * std::cos(playerAngle);
-    cameraZ = playerZ - unit;
+    cameraX = playerX - 6 * unit * std::sin(playerAngle);
+    cameraY = playerY - 6 * unit * std::cos(playerAngle);
+    cameraZ = playerZ - 3 * unit;
     cameraAngle = playerAngle;
   }
 
@@ -1439,7 +1436,6 @@ class Olc3d2 : public olc::PixelGameEngine {
 
     for (int quadCounter = 0; quadCounter < quads.size(); quadCounter++) {
       quad* q = &quads[quadCounter];
-      
 
       q->outOfRange = std::abs(q->vertices[0].x - cameraX) > drawDistance ||
                       std::abs(q->vertices[0].y - cameraY) > drawDistance;
@@ -2065,14 +2061,7 @@ class Olc3d2 : public olc::PixelGameEngine {
         e++;
       }
 
-      if (q->renderable == nullptr) {
-        SetDecalMode(olc::DecalMode::ADDITIVE);
-        DrawWarpedDecal(plasma.Decal(), q->projected, olc::Pixel(255, 0, 0));
-
-        SetDecalMode(olc::DecalMode::NORMAL);
-        // std::cout << "Plasma" << std::endl;
-
-      } else {
+      if (q->renderable != nullptr) {
         float dotProduct = q->centre.x * q->normal.x +
                            q->centre.y * q->normal.y +
                            q->centre.z * q->normal.z;
@@ -2212,8 +2201,9 @@ class Olc3d2 : public olc::PixelGameEngine {
       handleEditInputs(fElapsedTime);
     } else {
       handlePlayInputs(fElapsedTime);
-      playProcessing(fElapsedTime);
     }
+
+    if (!editMode) playProcessing(fElapsedTime);
 
     updateMatrix();
 
