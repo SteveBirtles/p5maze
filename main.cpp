@@ -587,7 +587,7 @@ void makeMaze() {
 
 class Olc3d2 : public olc::PixelGameEngine {
  public:
-  Olc3d2() { sAppName = "Olc3d2"; }
+  Olc3d2() { sAppName = "Olc3d2"; }  
 
   long frame = 0;
 
@@ -1015,6 +1015,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::M).bPressed) {
           day = true;
+          Clear(olc::Pixel(96, 128, 255));
           clearMap();
           undoBuffer.clear();
           regenerateQuads();
@@ -1022,6 +1023,7 @@ class Olc3d2 : public olc::PixelGameEngine {
 
         if (GetKey(olc::Key::G).bPressed) {
           day = false;
+          Clear(olc::BLACK);
           makeMaze();
           undoBuffer.clear();
           regenerateQuads();
@@ -1249,6 +1251,11 @@ class Olc3d2 : public olc::PixelGameEngine {
 
       if (GetKey(olc::Key::N).bPressed && !GetKey(olc::Key::CTRL).bHeld) {
         day = !day;
+        if (day) {
+          Clear(olc::Pixel(96, 128, 255));
+        } else {
+          Clear(olc::BLACK);
+        }
       }
 
       if (GetKey(olc::Key::H).bPressed) {
@@ -2212,12 +2219,6 @@ class Olc3d2 : public olc::PixelGameEngine {
     updateQuads();
     updateEntities();
     if (editMode) updateCursor();
-
-    if (day) {
-      Clear(olc::Pixel(96, 128, 255));
-    } else {
-      Clear(olc::BLACK);
-    }
 
     if (GetKey(olc::Key::TAB).bHeld) {
       renderMazeMap();
