@@ -587,7 +587,7 @@ void makeMaze() {
 
 class Olc3d2 : public olc::PixelGameEngine {
  public:
-  Olc3d2() { sAppName = "Olc3d2"; }  
+  Olc3d2() { sAppName = "Olc3d2"; }
 
   long frame = 0;
 
@@ -2203,6 +2203,23 @@ class Olc3d2 : public olc::PixelGameEngine {
 
   bool OnUserUpdate(float fElapsedTime) override {
     frame++;
+
+    for (int s = 0; s < 5; s++) {
+      for (int i = 0; i < SPRITE_SIZE; i++) {
+        for (int j = 0; j < SPRITE_SIZE; j++) {
+          sprite[s].Sprite()->SetPixel(
+              i, j,
+              olc::Pixel(
+                  std::rand() % 255, std::rand() % 255, std::rand() % 255,
+                  (i == SPRITE_SIZE / 2 && j == SPRITE_SIZE / 2)
+                      ? 255
+                      : static_cast<int>(255.0f * 10 /
+                                         (std::abs(i - SPRITE_SIZE / 2) *
+                                          std::abs(j - SPRITE_SIZE / 2)))));
+        }
+      }
+      sprite[s].Decal()->Update();
+    }
 
     if (editMode) {
       handleEditInputs(fElapsedTime);
