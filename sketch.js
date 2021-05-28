@@ -1,4 +1,4 @@
-"option strict";
+"use strict";
 
 const TILE_SIZE = 64;
 const SPRITE_SIZE = 64;
@@ -29,14 +29,14 @@ const GENERATOR_WALL = SKY_SINGLE_BLOCK;
 const GENERATOR_PATH = SKY;
 const GENERATOR_ROOM = SKY;
 
-const texture = [];
+const textures = [];
 
 const unit = 100;
 const MAX_WIDTH = 100;
 const MAX_HEIGHT = 100;
 let mazeWidth = 40;
 let mazeHeight = 40;
-let drawDistance = 30 * unit;
+let drawDistance = 1000;
 const MAX_CLIPBOARD_SIZE = 100;
 
 let cameraAngle = 0;
@@ -45,34 +45,13 @@ let cameraX = unit / 2;
 let cameraY = unit / 2;
 let cameraZ = unit / 2;
 
-let playerX, playerY, playerZ, playerAngle;
+let playerX = 0, playerY = 0, playerZ = 0, playerAngle;
 let lastPlayerX, lastPlayerY;
 
-let mousePos = { x: 0, y: 0 };
-let lastMousePos = { x: 0, y: 0 };
-let cursorX, cursorY;
-let cursorRotation = 0;
-
-let m = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-
-let zoom;
-let day = true;
-let showHelp = true;
-let noClip = false;
-let autoTexture = false;
 let levelNo = 1;
-let exitSignal = false;
-let editMode = true;
-
-let editCameraAngle, editCameraPitch, editCameraX, editCameraY, editCameraZ;
-
-let selectionStartX;
-let selectionStartY;
-let selectionEndX;
-let selectionEndY;
-let selectionLive = false;
 
 let quads = [];
+let sortedQuads = [];
 
 function updateMatrix() {
   const m1 = [[1, 0, 0],
@@ -93,16 +72,16 @@ function updateMatrix() {
 
 
 function playProcessing() {
-  cameraX = playerX - 6 * unit * sin(playerAngle);
-  cameraY = playerY - 6 * unit * cos(playerAngle);
-  cameraZ = playerZ - 3 * unit;
+  cameraX = playerX;
+  cameraY = playerY;
+  cameraZ = playerZ;
   cameraAngle = playerAngle;
 }
 
 function preload() {
 
   for (let i = 0; i < 176; i++) {
-    texture.push(loadImage("tiles/tile" + i + ".png"));
+    textures.push(loadImage("tiles/tile" + i + ".png"));
   }
 
 }
@@ -111,15 +90,18 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
 
+let cam3d;
+let cam2d;
+
+p5.disableFriendlyErrors = true;
+
 function setup() {
 
   angleMode(RADIANS);
 
-  createCanvas(windowWidth, windowHeight);
-  zoom = windowWidth / 2;
+  createCanvas(windowWidth, windowHeight, WEBGL);
 
   makeMaze();
-  //undoBuffer.clear();
   regenerateQuads();
 
   playerX = cameraX;
@@ -127,7 +109,11 @@ function setup() {
   playerZ = cameraZ;
   playerAngle = cameraAngle;
 
-  cameraPitch = 0.6;
+  cameraPitch = 0;
+
+  cam2d = createCamera();
+  cam3d = createCamera();
+  setCamera(cam3d);
 
 }
 
@@ -209,15 +195,50 @@ function setQuadTexture(x, y, id, wall, floor = false) {
 }
 
 class quadStruct {
-  constructor() {
+  constructor(p1, p2, p3, p4,
+    wall = false, mapX = 0, mapY = 0,
+    texture = -1, level = 0, direction = -1) {
+
+    if (p1 === undefined) p1 = [0, 0, 0];
+    if (p2 === undefined) p2 = [0, 0, 0];
+    if (p3 === undefined) p3 = [0, 0, 0];
+    if (p4 === undefined) p4 = [0, 0, 0];
+
+    this.texture = texture;;
+    this.vertices = [
+      { x: p1[0], y: p1[1], z: p1[2] },
+      { x: p2[0], y: p2[1], z: p2[2] },
+      { x: p3[0], y: p3[1], z: p3[2] },
+      { x: p4[0], y: p4[1], z: p4[2] }
+    ];
+
+    this.visible = false;
+
+    this.mapX = mapX;
+    this.mapY = mapY;
+
+    this.dSquared = 0;
+
+    this.wall = wall;
+    this.level = level;
+    this.direction = direction;
+
+    this.r = 0;
+    this.g = 0;
+    this.b = 0;
+
+    this.centre = {
+      x: (this.vertices[0].x + this.vertices[1].x + this.vertices[2].x + this.vertices[3].x) / 4,
+      y: (this.vertices[0].y + this.vertices[1].y + this.vertices[2].y + this.vertices[3].y) / 4,
+      z: (this.vertices[0].z + this.vertices[1].z + this.vertices[2].z + this.vertices[3].z) / 4
+    };
+
 
   }
 }
 
 function regenerateQuads() {
-  
-  console.log("Regenerating quads");
-  
+
   quads = [];
 
   for (let i = -mazeWidth; i <= mazeWidth; i++) {
@@ -356,29 +377,6 @@ function regenerateQuads() {
   }
 }
 
-/*
-
-function makeEntities(let count) {
-  entities.clear();
-
-  for (let i = 0; i < count; i++) {
-  tryAgain:
-
-    let x = rand() % (mazeWidth * 2) - mazeWidth;
-    let y = rand() % (mazeHeight * 2) - mazeHeight;
-    let s = rand() % 50;
-
-    for (auto e : entities) {
-      if (e.mapX == x && e.mapY == y) goto tryAgain;
-    }
-
-    entities.push(
-        entity([static_cast<float>(x + 0.5) * unit,
-                      static_cast<float>(y + 0.5) * unit, 7 * unit / 8, -1),
-               x, y, s));
-  }
-}*/
-
 function rand() {
   return Math.floor(random(0, 65535));
 }
@@ -414,16 +412,14 @@ class mapCell {
 }
 
 let map = [];
-for (let j = 0; j < MAX_HEIGHT * 2 + 1; j++) {
+for (let j = 0; j <= MAX_HEIGHT * 2 + 1; j++) {
   let row = [];
-  for (let i = 0; i < MAX_WIDTH * 2 + 1; i++) {
+  for (let i = 0; i <= MAX_WIDTH * 2 + 1; i++) {
     row.push(new mapCell());
   }
   map.push(row);
 }
 
-//mapCell map[MAX_WIDTH * 2 + 1][MAX_HEIGHT * 2 + 1];
-//mapCell clipboard[MAX_CLIPBOARD_SIZE][MAX_CLIPBOARD_SIZE];
 
 let kruskalMaze = [];
 for (let j = 0; j < MAX_HEIGHT; j++) {
@@ -570,165 +566,54 @@ function makeMaze() {
   }
 }
 
-
-
-function keyPressed() {
-
-  if (key == 'p' && keyIsDown(CONTROL)) {
-    cameraAngle = editCameraAngle;
-    cameraPitch = editCameraPitch;
-    cameraX = editCameraX;
-    cameraY = editCameraY;
-    cameraZ = editCameraZ;
-    editMode = true;
-    return;
-  }
-
-  if (key == 'q' && keyIsDown(CONTROL)) {
-    exitSignal = true;
-  }
-
-  if (key == 'n' && keyIsDown(CONTROL)) {
-    noClip = !noClip;
-  }
-
-}
-
 function handlePlayInputs(frameLength) {
 
   lastPlayerX = playerX;
   lastPlayerY = playerY;
 
-  if (keyIsDown(LEFT_ARROW)) playerAngle += 2 * frameLength;
-  if (keyIsDown(RIGHT_ARROW)) playerAngle -= 2 * frameLength;
+  if (keyIsDown(LEFT_ARROW)) {
+    playerAngle += 4 * frameLength;
+    if (playerAngle > PI) playerAngle -= 2 * PI;
+    //console.log(playerX, playerY, playerZ, playerAngle);
+
+  }
+  if (keyIsDown(RIGHT_ARROW)) {
+    playerAngle -= 4 * frameLength;
+    if (playerAngle < -PI) playerAngle += 2 * PI;
+    //console.log(playerX, playerY, playerZ, playerAngle);
+  }
 
   if (keyIsDown(87)) { //W
-    playerX += sin(playerAngle) * unit * 2 * frameLength;
-    playerY += cos(playerAngle) * unit * 2 * frameLength;
-    console.log(playerX, playerY);
+    playerX += sin(playerAngle) * unit * 4 * frameLength;
+    playerY += cos(playerAngle) * unit * 4 * frameLength;
+    //console.log(playerX, playerY, playerZ);
   }
   if (keyIsDown(83)) { //S
-    playerX -= sin(playerAngle) * unit * 2 * frameLength;
-    playerY -= cos(playerAngle) * unit * 2 * frameLength;
-    console.log(playerX, playerY);
+    playerX -= sin(playerAngle) * unit * 4 * frameLength;
+    playerY -= cos(playerAngle) * unit * 4 * frameLength;
+    //console.log(playerX, playerY, playerZ);
   }
   if (keyIsDown(65)) { //A
-    playerX += cos(playerAngle) * unit * 2 * frameLength;
-    playerY += -sin(playerAngle) * unit * 2 * frameLength;
-    console.log(playerX, playerY);
+    playerX += cos(playerAngle) * unit * 4 * frameLength;
+    playerY += -sin(playerAngle) * unit * 4 * frameLength;
+    //console.log(playerX, playerY, playerZ);
   }
   if (keyIsDown(68)) { //D
-    playerX -= cos(playerAngle) * unit * 2 * frameLength;
-    playerY -= -sin(playerAngle) * unit * 2 * frameLength;
-    console.log(playerX, playerY);
+    playerX -= cos(playerAngle) * unit * 4 * frameLength;
+    playerY -= -sin(playerAngle) * unit * 4 * frameLength;
+    //console.log(playerX, playerY, playerZ);
   }
+
+  let distanceTravelled = sqrt(pow(playerX - lastPlayerX, 2) + pow(playerY - lastPlayerY, 2));
+  if (distanceTravelled > unit) {
+    let dx = (playerX - lastPlayerX) / distanceTravelled;
+    let dy = (playerY - lastPlayerY) / distanceTravelled;
+    playerX = lastPlayerX + dx * unit;
+    playerY = lastPlayerY + dy * unit;
+    console.log("Stead on, son.");
+  }
+
 }
-
-/*
-
-function handleEditInputs(let frameLength) {
-  mousePos = GetMousePos();
-
-  if (keyIsDown('KeyP).bPressed && keyIsDown('ControlLeft)) {
-    editCameraAngle = cameraAngle;
-    editCameraPitch = cameraPitch;
-    editCameraX = cameraX;
-    editCameraY = cameraY;
-    editCameraZ = cameraZ;
-
-    playerX = cameraX;
-    playerY = cameraY;
-    playerZ = cameraZ;
-    playerAngle = cameraAngle;
-
-    cameraPitch = 0.6;
-
-    editMode = false;
-  }
-
-  if (GetMouse(2) || keyIsDown('KeyOEM_5)) {
-    let iMax = static_cast<int>(w / (TILE_SIZE + 10));
-    let jMax = static_cast<int>(176 / iMax) + 1;
-
-    selectedTexture =
-        static_cast<int>(mousePos.y / (TILE_SIZE + 10.0f)) * iMax +
-        static_cast<int>(mousePos.x < (iMax - 1) * (TILE_SIZE + 10.0f)
-                             ? mousePos.x / (TILE_SIZE + 10.0f)
-                             : (iMax - 1));
-
-    if (selectedTexture < 0) selectedTexture = 0;
-    if (selectedTexture > 175) selectedTexture = 175;
-
-  } else {
-    let mouseWheel = GetMouseWheel();
-
-    if (mouseWheel < 0) selectedBlock = (selectedBlock + 1) % 12;
-    if (mouseWheel > 0) selectedBlock = (selectedBlock + 11) % 12;
-
-    if (keyIsDown('ArrowLeft)) cameraAngle += 2 * frameLength;
-    if (keyIsDown('ArrowRight)) cameraAngle -= 2 * frameLength;
-
-    if (cursorX >= 0 && cursorY >= 0 && cursorX <= mazeWidth * 2 &&
-        cursorY <= mazeHeight * 2) {
-      if (GetMouse(0) && quad::cursorQuad != nullptr) {
-        let x = quad::cursorQuad->mapX;
-        let y = quad::cursorQuad->mapY;
-        let f = quad::cursorQuad->level;
-        let d = quad::cursorQuad->direction;
-
-        uint8_t candidateTexture;
-function clearMap() {
-for (let i = -mazeWidth; i <= mazeWidth; i++) {
-  for (let j = -mazeHeight; j <= mazeHeight; j++) {
-    if (i == -mazeWidth || j == -mazeWidth || i == mazeWidth ||
-        j == mazeWidth) {
-      map[i + mazeWidth][j + mazeHeight].type = WALL;
-      for (let f = 0; f < 3; f++) {
-        for (let d = 0; d < 4; d++) {
-          map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
-        }
-      }
-      for (let f = 0; f < 4; f++) {
-        map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
-      }
-    } else {
-      map[i + mazeWidth][j + mazeHeight].type = SKY;
-      for (let f = 0; f < 3; f++) {
-        for (let d = 0; d < 4; d++) {
-          map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
-        }
-      }
-      for (let f = 0; f < 4; f++) {
-        map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
-      }
-    }
-  }
-}
-}
-
-
-
-/*
-function makeEntities(let count) {
-  entities.clear();
-
-  for (let i = 0; i < count; i++) {
-    tryAgain:
-
-    let x = rand() % (mazeWidth * 2) - mazeWidth;
-    let y = rand() % (mazeHeight * 2) - mazeHeight;
-    let s = rand() % 50;
-
-    for (auto e : entities) {
-      if (e.mapX == x && e.mapY == y) goto tryAgain;
-    }
-
-    entities.push(
-      entity([static_cast<float>(x + 0.5) * unit,
-      static_cast<float>(y + 0.5) * unit, 7 * unit / 8, -1),
-      x, y, s));
-  }
-}*/
 
 function kruskalStep() {
   let oneSet = true;
@@ -862,439 +747,99 @@ function makeMaze() {
     }
   }
 }
-/*tedTexture) {
-  undoBuffer.push(action(map[x][y], x, y, frame));
 
-  if (quad:: cursorQuad -> wall) {
-    map[x][y].wall[f][d] = selectedTexture;
-  } else {
-    map[x][y].flat[f] = selectedTexture;
+let rays;
+
+function handlePlayerInteractions() {
+
+  rays = [];
+
+  let mapXstart = Math.floor(lastPlayerX / unit) + mazeWidth;
+  let mapYstart = Math.floor(lastPlayerY / unit) + mazeHeight;
+  let mapXtarget = Math.floor(playerX / unit) + mazeWidth;
+  let mapYtarget = Math.floor(playerY / unit) + mazeHeight;
+
+  let lowestX = min(mapXstart, mapXtarget) - 1;
+  let highestX = max(mapXstart, mapXtarget) + 1;
+  let lowestY = min(mapYstart, mapYtarget) - 1;
+  let highestY = max(mapYstart, mapYtarget) + 1;
+
+  let mapZ = 0;
+  if (playerZ < -5 * unit / 2 || playerZ > unit / 2)
+    return;
+  else if (playerZ < -3 * unit / 2)
+    mapZ = 2;
+  else if (playerZ < -unit / 2)
+    mapZ = 1;
+
+  let INTERACTION_BIT;
+  switch (mapZ) {
+    case 0:
+      INTERACTION_BIT = WALL_BIT;
+      break;
+    case 1:
+      INTERACTION_BIT = LOW_BIT;
+      break;
+    case 2:
+      INTERACTION_BIT = HIGH_BIT;
+      break;
   }
 
-  quad:: cursorQuad -> renderable = & texture[selectedTexture];
-}
+  //console.log(lowestX, highestX, ",", lowestY, highestY, "=", playerX, playerY);
 
-      } else if (GetMouse(1) && quad:: cursorQuad != nullptr) {
-  cameraAngle -= static_cast<float>(mousePos.x - lastMousePos.x) /
-    (w / 4) * ((w / 2) / zoom);
+  for (let i = lowestX; i <= highestX; i++) {
+    for (let j = lowestY; j <= highestY; j++) {
 
-} else if (keyIsDown('KeyQ).bPressed) {
-        let x = quad:: cursorQuad -> mapX;
-let y = quad:: cursorQuad-> mapY;
-let f = quad:: cursorQuad-> level;
-let d = quad:: cursorQuad-> direction;
+      if (i >= 0 && j >= 0 &&
+        i < mazeWidth * 2 + 1 && j < mazeWidth * 2 + 1) {
 
-if (quad:: cursorQuad -> wall) {
-  selectedTexture = map[x][y].wall[f][d];
-} else if (f == 0) {
-  selectedTexture = map[x][y].flat[f];
-}
+        if (map[i][j].type & INTERACTION_BIT) {
 
-      } else if ((keyIsDown('KeyT).bPressed ||
-                  keyIsDown('KeyF).bPressed ||
-                  keyIsDown('KeyC).bPressed) &&
-                 !keyIsDown('ControlLeft)) {
-        if (selectionLive) {
-    let x1 = selectionStartX < selectionEndX ? selectionStartX
-      : selectionEndX;
-    let y1 = selectionStartY < selectionEndY ? selectionStartY
-      : selectionEndY;
-    let x2 = selectionStartX > selectionEndX ? selectionStartX
-      : selectionEndX;
-    let y2 = selectionStartY > selectionEndY ? selectionStartY
-      : selectionEndY;
+          let nearestPoint = {
+            x: max((i - mazeWidth) * unit, min(playerX, ((i - mazeWidth) + 1) * unit)),
+            y: max((j - mazeHeight) * unit, min(playerY, ((j - mazeHeight) + 1) * unit))
+          };
 
-    if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
-    if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
+          let ray = {
+            x: nearestPoint.x - playerX,
+            y: nearestPoint.y - playerY,
+            i: i,
+            j: j,
+            length: 0,
+            overlap: 0
+          };
 
-    for (let i = x1; i <= x2; i++) {
-      for (let j = y1; j <= y2; j++) {
-        undoBuffer.push(action(map[i][j], i, j, frame));
-        if (keyIsDown('KeyT).bPressed)
-                setQuadTexture(i, j, selectedTexture, true);
-        if (keyIsDown('KeyF).bPressed)
-                setQuadTexture(i, j, selectedTexture, false, true);
-        if (keyIsDown('KeyC).bPressed)
-                setQuadTexture(i, j, selectedTexture, false);
-      }
-    }
+          ray.length = sqrt(pow(ray.x, 2) - pow(ray.y, 2));
+          if (isNaN(ray.length) || ray.length == 0) continue;
 
-    selectionLive = false;
+          ray.overlap = unit * 0.5 - ray.length;
+          if (isNaN(ray.overlap)) continue;           
 
-  } else {
-    let x = quad:: cursorQuad-> mapX;
-    let y = quad:: cursorQuad-> mapY;
-    undoBuffer.push(action(map[x][y], x, y, frame));
+          rays.push(ray);
 
-    if (keyIsDown('KeyT).bPressed)
-            setQuadTexture(x, y, selectedTexture, true);
-    if (keyIsDown('KeyF).bPressed)
-            setQuadTexture(x, y, selectedTexture, false, true);
-    if (keyIsDown('KeyC).bPressed)
-            setQuadTexture(x, y, selectedTexture, false);
-  }
-      }
-    }
+          if (ray.overlap > 0) {
 
-if (keyIsDown('KeyR).bPressed) {
-      if (keyIsDown('ControlLeft)) {
-        cursorRotation = (cursorRotation + 7) % 8;
-      } else {
-  cursorRotation = (cursorRotation + 1) % 8;
-}
-    }
+            //console.log("overlap", overlap, "rayLength", rayLength);
 
-if (keyIsDown('KeyESCAPE).bPressed) {
-      selectionLive = false;
-    }
+            //playerX -= ray.overlap * ray.x / ray.length;
+            //playerY -= ray.overlap * ray.y / ray.length;
 
-if (keyIsDown('KeySHIFT).bPressed && quad::cursorQuad != nullptr) {
-      selectionStartX = quad:: cursorQuad -> mapX;
-selectionStartY = quad:: cursorQuad -> mapY;
-selectionEndX = quad:: cursorQuad -> mapX;
-selectionEndY = quad:: cursorQuad -> mapY;
-selectionLive = true;
-    }
-
-if (keyIsDown('KeySHIFT) && quad::cursorQuad != nullptr) {
-      selectionEndX = quad:: cursorQuad -> mapX;
-selectionEndY = quad:: cursorQuad -> mapY;
-    }
-
-if (keyIsDown('ControlLeft)) {
-      if (keyIsDown('KeyK1).bPressed) {
-        levelNo = 1;
-      } else if (keyIsDown('KeyK2).bPressed) {
-        levelNo = 2;
-      } else if (keyIsDown('KeyK3).bPressed) {
-        levelNo = 3;
-      } else if (keyIsDown('KeyK4).bPressed) {
-        levelNo = 4;
-      } else if (keyIsDown('KeyK5).bPressed) {
-        levelNo = 5;
-      } else if (keyIsDown('KeyK6).bPressed) {
-        levelNo = 6;
-      } else if (keyIsDown('KeyK7).bPressed) {
-        levelNo = 7;
-      } else if (keyIsDown('KeyK8).bPressed) {
-        levelNo = 8;
-      } else if (keyIsDown('KeyK9).bPressed) {
-        levelNo = 9;
-      } else if (keyIsDown('KeyK0).bPressed) {
-        levelNo = 10;
-      }
-
-if (keyIsDown('KeyZ).bPressed && undoBuffer.size() > 0) {
-        action u = undoBuffer.back();
-let f = u.frame;
-while (u.frame == f) {
-  map[u.x][u.y] = u.cell;
-  undoBuffer.pop_back();
-  if (undoBuffer.size() == 0) break;
-  u = undoBuffer.back();
-}
-regenerateQuads();
-      }
-
-if (keyIsDown('KeyE).bPressed) {
-        makeEntities(1000);
-      }
-
-if (keyIsDown('KeyT).bPressed) {
-        autoTexture = !autoTexture;
-      }
-
-if (keyIsDown('KeyQ).bPressed) {
-        exitSignal = true;
-      }
-
-if (keyIsDown('KeyS).bPressed) {
-        saveLevel();
-      }
-
-if (keyIsDown('KeyL).bPressed) {
-        undoBuffer.clear();
-loadLevel();
-      }
-
-if (keyIsDown('KeyM).bPressed) {
-        day = true;
-Clear(olc:: Pixel(96, 128, 255));
-clearMap();
-undoBuffer.clear();
-regenerateQuads();
-      }
-
-if (keyIsDown('KeyG).bPressed) {
-        day = false;
-Clear(olc:: BLACK);
-makeMaze();
-undoBuffer.clear();
-regenerateQuads();
-      }
-
-if (keyIsDown('KeyHOME).bPressed) {
-        zoom = w / 2;
-drawDistance = 30 * unit;
-      }
-
-    } else {
-  if (keyIsDown('KeyK1).bPressed) {
-        selectedBlock = 0;
-} else if (keyIsDown('KeyK2).bPressed) {
-        selectedBlock = 1;
-      } else if (keyIsDown('KeyK3).bPressed) {
-        selectedBlock = 2;
-      } else if (keyIsDown('KeyK4).bPressed) {
-        selectedBlock = 3;
-      } else if (keyIsDown('KeyK5).bPressed) {
-        selectedBlock = 4;
-      } else if (keyIsDown('KeyK6).bPressed) {
-        selectedBlock = 5;
-      } else if (keyIsDown('KeyK7).bPressed) {
-        selectedBlock = 6;
-      } else if (keyIsDown('KeyK8).bPressed) {
-        selectedBlock = 7;
-      } else if (keyIsDown('KeyK9).bPressed) {
-        selectedBlock = 8;
-      } else if (keyIsDown('KeyK0).bPressed) {
-        selectedBlock = 9;
-      } else if (keyIsDown('KeyMINUS).bPressed) {
-        selectedBlock = 10;
-      } else if (keyIsDown('KeyEQUALS).bPressed) {
-        selectedBlock = 11;
-      }
-    }
-
-if (keyIsDown('KeyOEM_4)) drawDistance /= 1.01;
-    if (keyIsDown('KeyOEM_6)) drawDistance *= 1.01;
-
-    if (drawDistance < unit) drawDistance = unit;
-if (drawDistance > unit * mazeWidth * 2)
-  drawDistance = unit * mazeWidth * 2;
-
-if (keyIsDown('ArrowDown)) cameraPitch += 2 * frameLength;
-    if (keyIsDown('ArrowUp)) cameraPitch -= 2 * frameLength;
-    if (keyIsDown('KeyHOME)) cameraPitch = 0;
-
-    if (keyIsDown('KeyPGUP)) cameraZ -= unit * 2 * frameLength;
-    if (keyIsDown('KeyPGDN)) cameraZ += unit * 2 * frameLength;
-    if (keyIsDown('KeyEND)) cameraZ = unit / 2;
-
-    if (cameraZ > unit / 2) cameraZ = unit / 2;
-
-if (keyIsDown('KeyC).bPressed && keyIsDown('ControlLeft)) {
-  if (selectionLive) {
-    let x1 =
-      selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
-    let y1 =
-      selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
-    let x2 =
-      selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
-    let y2 =
-      selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
-
-    if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
-    if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
-
-    clipboardWidth = x2 - x1 + 1;
-    clipboardHeight = y2 - y1 + 1;
-    cursorRotation = 0;
-
-    for (let i = x1; i <= x2; i++) {
-      for (let j = y1; j <= y2; j++) {
-        clipboard[i - x1][j - y1] = map[i][j];
-      }
-    }
-  }
-}
-
-if (quad:: cursorQuad != nullptr) {
-  let x = quad:: cursorQuad-> mapX;
-  let y = quad:: cursorQuad-> mapY;
-
-  if (keyIsDown('KeySPACE).bPressed) {
-        if (selectionLive) {
-      let x1 = selectionStartX < selectionEndX ? selectionStartX
-        : selectionEndX;
-      let y1 = selectionStartY < selectionEndY ? selectionStartY
-        : selectionEndY;
-      let x2 = selectionStartX > selectionEndX ? selectionStartX
-        : selectionEndX;
-      let y2 = selectionStartY > selectionEndY ? selectionStartY
-        : selectionEndY;
-
-      if (x2 - x1 >= MAX_CLIPBOARD_SIZE) x2 = x1 + MAX_CLIPBOARD_SIZE - 1;
-      if (y2 - y1 >= MAX_CLIPBOARD_SIZE) y2 = y1 + MAX_CLIPBOARD_SIZE - 1;
-
-      for (let i = x1; i <= x2; i++) {
-        for (let j = y1; j <= y2; j++) {
-          undoBuffer.push(action(map[i][j], i, j, frame));
-          map[i][j].type = selectedBlockTypes[selectedBlock];
-          if (autoTexture) {
-            setQuadTexture(i, i, selectedTexture, true);
-            setQuadTexture(j, j, selectedTexture, false);
-            setQuadTexture(j, j, selectedTexture, false, true);
           }
+
         }
       }
 
-      regenerateQuads();
 
-      selectionLive = false;
-
-    } else {
-      undoBuffer.push(action(map[x][y], x, y, frame));
-      map[x][y].type = selectedBlockTypes[selectedBlock];
-      regenerateQuads();
-      if (autoTexture) {
-        setQuadTexture(x, y, selectedTexture, true);
-        setQuadTexture(x, y, selectedTexture, false);
-        setQuadTexture(x, y, selectedTexture, false, true);
-      }
-    }
-  quad:: cursorQuad = nullptr;
-}
-
-clipboardPreview = keyIsDown('KeyV);
-
-      if (keyIsDown('KeyV).bPressed && keyIsDown('ControlLeft)) {
-  for (let i = 0; i < clipboardWidth; i++) {
-    for (let j = 0; j < clipboardHeight; j++) {
-      switch (cursorRotation) {
-        case 0:
-          if (x + i < 0 || y + j < 0 || x + i > 2 * mazeWidth ||
-            y + j > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x + i][y + j], x + i, y + j, frame));
-          map[x + i][y + j] = clipboard[i][j];
-          break;
-
-        case 1:
-          if (x + j < 0 || y + i < 0 || x + j > 2 * mazeWidth ||
-            y + i > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x + j][y + i], x + j, y + i, frame));
-          map[x + j][y + i] = clipboard[i][j];
-          break;
-
-        case 2:
-          if (x - j < 0 || y + i < 0 || x - j > 2 * mazeWidth ||
-            y + i > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x - j][y + i], x - j, y + i, frame));
-          map[x - j][y + i] = clipboard[i][j];
-          break;
-
-        case 3:
-          if (x - i < 0 || y + j < 0 || x - i > 2 * mazeWidth ||
-            y + j > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x - i][y + j], x - i, y + j, frame));
-          map[x - i][y + j] = clipboard[i][j];
-          break;
-
-        case 4:
-          if (x - i < 0 || y - j < 0 || x - i > 2 * mazeWidth ||
-            y - j > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x - i][y - j], x - i, y - j, frame));
-          map[x - i][y - j] = clipboard[i][j];
-          break;
-
-        case 5:
-          if (x - j < 0 || y - i < 0 || x - j > 2 * mazeWidth ||
-            y - i > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x - j][y - i], x - j, y - i, frame));
-          map[x - j][y - i] = clipboard[i][j];
-          break;
-
-        case 6:
-          if (x + i < 0 || y - i < 0 || x + j > 2 * mazeWidth ||
-            y - i > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x + j][y - i], x + j, y - i, frame));
-          map[x + j][y - i] = clipboard[i][j];
-          break;
-
-        case 7:
-          if (x + i < 0 || y - j < 0 || x + i > 2 * mazeWidth ||
-            y - j > 2 * mazeWidth)
-            continue;
-          undoBuffer.push(
-            action(map[x + i][y - j], x + i, y - j, frame));
-          map[x + i][y - j] = clipboard[i][j];
-          break;
-      }
     }
   }
-  regenerateQuads();
+
+
 }
 
-if (keyIsDown('KeyE).bPressed && !keyIsDown('ControlLeft)) {
-  for (let i = 0; i < 12; i++) {
-    if (map[x][y].type == selectedBlockTypes[i]) {
-      selectedBlock = i;
-    }
-  }
-}
-    }
 
-if (keyIsDown('KeyPERIOD)) zoom *= 1.05;
-    if (keyIsDown('KeyCOMMA)) zoom /= 1.05;
-    if (zoom < w / 4) zoom = w / 4;
-if (zoom > w * 5) zoom = w * 5;
-
-if (keyIsDown('KeyN).bPressed && !keyIsDown('ControlLeft)) {
-  day = !day;
-  if (day) {
-    Clear(olc:: Pixel(96, 128, 255));
-  } else {
-    Clear(olc:: BLACK);
-  }
-}
-
-if (keyIsDown('KeyH).bPressed) {
-      showHelp = !showHelp;
-    }
-
-if (cameraPitch < -1.571) cameraPitch = -1.571;
-if (cameraPitch > 1.571) cameraPitch = 1.571;
-
-if (!keyIsDown('ControlLeft)) {
-      if (keyIsDown('KeyW)) {
-        cameraX += sin(cameraAngle) * unit * 2 * frameLength;
-cameraY += cos(cameraAngle) * unit * 2 * frameLength;
-      }
-if (keyIsDown('KeyS)) {
-        cameraX -= sin(cameraAngle) * unit * 2 * frameLength;
-cameraY -= cos(cameraAngle) * unit * 2 * frameLength;
-      }
-if (keyIsDown('KeyA)) {
-        cameraX += cos(cameraAngle) * unit * 2 * frameLength;
-cameraY += -sin(cameraAngle) * unit * 2 * frameLength;
-      }
-if (keyIsDown('KeyD)) {
-        cameraX -= cos(cameraAngle) * unit * 2 * frameLength;
-cameraY -= -sin(cameraAngle) * unit * 2 * frameLength;
-      }
-    }
-  }
-}
-
-* /
-
-function handlePlayerInteractions() {
-  let mapX = playerX / unit + mazeWidth;
-  let mapY = playerY / unit + mazeHeight;
+function handlePlayerInteractions_old() {
+  let mapX = Math.floor(playerX / unit) + mazeWidth;
+  let mapY = Math.floor(playerY / unit) + mazeHeight;
 
   let mapZ = 0;
   if (playerZ < -5 * unit / 2 || playerZ > unit / 2)
@@ -1405,863 +950,204 @@ function handlePlayerInteractions() {
   }
 }
 
-/*
-
-function updateEntities() {
-  for (auto& e : entities) {
-    e.outOfRange = std::abs(e.position.x - cameraX) > drawDistance ||
-                   std::abs(e.position.y - cameraY) > drawDistance;
-
-    if (e.outOfRange) continue;
-
-    e.transformed.x = (e.position.x - cameraX) * m[0][0] +
-                      (e.position.y - cameraY) * m[0][1] +
-                      (e.position.z - cameraZ) * m[0][2];
-    e.transformed.y = (e.position.x - cameraX) * m[1][0] +
-                      (e.position.y - cameraY) * m[1][1] +
-                      (e.position.z - cameraZ) * m[1][2];
-    e.transformed.z = (e.position.x - cameraX) * m[2][0] +
-                      (e.position.y - cameraY) * m[2][1] +
-                      (e.position.z - cameraZ) * m[2][2];
-    e.visible = true;
-
-    if (e.transformed.x > drawDistance || e.transformed.y > drawDistance ||
-        e.transformed.z > drawDistance || e.transformed.y < OMEGA) {
-      e.visible = false;
-      continue;
-    }
-
-    e.scale = {5 * SPRITE_SIZE / (e.transformed.y + OMEGA),
-               5 * SPRITE_SIZE / (e.transformed.y + OMEGA)};
-
-    e.projected = {
-        w / 2 - (e.transformed.x * zoom) / (e.transformed.y + OMEGA) -
-            (SPRITE_SIZE / 2) * e.scale.x,
-        h / 2 + (e.transformed.z * zoom) / (e.transformed.y + OMEGA) -
-            (SPRITE_SIZE / 2) * e.scale.y};
-
-    e.dSquared = std::pow(e.transformed.x, 2) + std::pow(e.transformed.y, 2) +
-                 std::pow(e.transformed.z, 2);
-  }
-}
-
 function updateQuads() {
-  let levelQuads = quads.size();
 
-  for (let quadCounter = 0; quadCounter < quads.size(); quadCounter++) {
-    quad* q = &quads[quadCounter];
+  for (let quadCounter = 0; quadCounter < quads.length; quadCounter++) {
+    let q = quads[quadCounter];
 
-    q->outOfRange = std::abs(q->vertices[0].x - cameraX) > drawDistance ||
-                    std::abs(q->vertices[0].y - cameraY) > drawDistance;
+    q.visible = true;
 
-    if (q->outOfRange) continue;
+    let outOfRange = abs(q.vertices[0].x - cameraX) > drawDistance ||
+      abs(q.vertices[0].y - cameraY) > drawDistance;
 
-    let maxX = 0;
-    let maxY = 0;
-    let maxZ = 0;
+    if (outOfRange) q.visible = false;
 
-    for (let i = 0; i < 4; i++) {
-      q->transformed[i].x = (q->vertices[i].x - cameraX) * m[0][0] +
-                            (q->vertices[i].y - cameraY) * m[0][1] +
-                            (q->vertices[i].z - cameraZ) * m[0][2];
-      if (std::abs(q->transformed[i].x) > maxX)
-        maxX = std::abs(q->transformed[i].x);
-      q->transformed[i].y = (q->vertices[i].x - cameraX) * m[1][0] +
-                            (q->vertices[i].y - cameraY) * m[1][1] +
-                            (q->vertices[i].z - cameraZ) * m[1][2];
-      if (std::abs(q->transformed[i].y) > maxY)
-        maxY = std::abs(q->transformed[i].y);
-      q->transformed[i].z = (q->vertices[i].x - cameraX) * m[2][0] +
-                            (q->vertices[i].y - cameraY) * m[2][1] +
-                            (q->vertices[i].z - cameraZ) * m[2][2];
-      if (std::abs(q->transformed[i].z) > maxZ)
-        maxZ = std::abs(q->transformed[i].z);
-      q->visible = true;
-      q->cropped = false;
 
-      q->partials.clear();
-    }
+    q.dSquared = pow(q.centre.x - cameraX, 2) + pow(q.centre.y - cameraY, 2) + pow(q.centre.z - cameraZ, 2);
 
-    if (maxX > drawDistance || maxY > drawDistance || maxZ > drawDistance) {
-      q->visible = false;
-      continue;
-    }
+    let d = 255 * (1 - q.dSquared / pow(drawDistance, 2));
+    if (d > 255) d = 255;
+    if (d <= 0) continue;
 
-    if (!q->wall) {
-      let lostCornerCount = 0;
+    q.r = d;
+    q.g = d;
+    q.b = d;
 
-      for (let j = 0; j < 4; j++) {
-        if (q->transformed[j].y < OMEGA) lostCornerCount++;
-      }
-
-      if (lostCornerCount > 0) {
-        q->visible = false;
-
-        if (lostCornerCount < 4) {
-          let n = 0;
-          let nY = 0;
-          for (let j = 0; j < 4; j++) {
-            if (q->transformed[j].y > nY) {
-              nY = q->transformed[j].y;
-              n = j;
-            }
-          }
-
-          let x0 = q->transformed[n].x;
-          let y0 = q->transformed[n].y;
-          let z0 = q->transformed[n].z;
-
-          let x3 = q->transformed[(n + 2) % 4].x;
-          let y3 = q->transformed[(n + 2) % 4].y;
-          let z3 = q->transformed[(n + 2) % 4].z;
-
-          let d0 = std::sqrt(std::pow(x3 - x0, 2) + std::pow(y3 - y0, 2));
-          let dx0 = (x3 - x0) / d0;
-          let dy0 = (y3 - y0) / d0;
-
-          let lambdaY = OMEGA;
-          let lambda = (lambdaY - y0) / dy0;
-          let lambdaX = x0 + lambda * dx0;
-
-          let x1 = q->transformed[(n + 1) % 4].x;
-          let y1 = q->transformed[(n + 1) % 4].y;
-          let z1 = q->transformed[(n + 1) % 4].z;
-          let d1 = std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2) +
-                               std::pow(z1 - z0, 2));
-          let dx1 = (x1 - x0) / d1;
-          let dy1 = (y1 - y0) / d1;
-          let dz1 = (z1 - z0) / d1;
-
-          let x2 = q->transformed[(n + 3) % 4].x;
-          let y2 = q->transformed[(n + 3) % 4].y;
-          let z2 = q->transformed[(n + 3) % 4].z;
-          let d2 = std::sqrt(std::pow(x2 - x0, 2) + std::pow(y2 - y0, 2) +
-                               std::pow(z2 - z0, 2));
-          let dx2 = (x2 - x0) / d2;
-          let dy2 = (y2 - y0) / d2;
-          let dz2 = (z2 - z0) / d2;
-
-          let alpha = (lambdaX - x0) * dx1 + (lambdaY - y0) * dy1;
-
-          let xAlpha = x0 + dx1 * alpha;
-          let yAlpha = y0 + dy1 * alpha;
-          let zAlpha = z0 + dz1 * alpha;
-
-          let xBeta = x0 + dx2 * alpha;
-          let yBeta = y0 + dy2 * alpha;
-          let zBeta = z0 + dz2 * alpha;
-
-          let xGamma = x0 + dx1 * alpha + dx2 * alpha;
-          let yGamma = y0 + dy1 * alpha + dy2 * alpha;
-          let zGamma = z0 + dz1 * alpha + dz2 * alpha;
-
-          vertex vs[4] = {[x0, y0, z0, -1),
-                          [xAlpha, yAlpha, zAlpha, -1),
-                          [xGamma, yGamma, zGamma, -1),
-                          [xBeta, yBeta, zBeta, -1)};
-
-          let u, v, du, dv;
-          std::vector<int> order;
-
-          if (n == 0) {
-            u = 0;
-            v = 0;
-            du = TILE_SIZE * alpha / d1;
-            dv = TILE_SIZE * alpha / d2;
-            order = {0, 1, 2, 3};
-          }
-
-          if (n == 1) {
-            u = 0;
-            v = TILE_SIZE * (1 - alpha / d2);
-            du = TILE_SIZE * alpha / d1;
-            dv = TILE_SIZE * alpha / d2;
-            order = {3, 0, 1, 2};
-          }
-
-          if (n == 2) {
-            u = TILE_SIZE * (1 - alpha / d1);
-            v = TILE_SIZE * (1 - alpha / d2);
-            du = TILE_SIZE * alpha / d1;
-            dv = TILE_SIZE * alpha / d2;
-            order = {2, 3, 0, 1};
-          }
-
-          if (n == 3) {
-            u = TILE_SIZE * (1 - alpha / d1);
-            v = 0;
-            du = TILE_SIZE * alpha / d1;
-            dv = TILE_SIZE * alpha / d2;
-            order = {1, 2, 3, 0};
-          }
-
-          q->partials.push(partial(
-              {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
-              {static_cast<int>(u), static_cast<int>(v), static_cast<int>(du),
-               static_cast<int>(dv)},
-              q->colour));
-
-          if (y1 >= OMEGA) {
-            let yTheta = OMEGA;
-            let theta = (yTheta - y1) / (y3 - y1);
-            let xTheta = x1 + theta * (x3 - x1);
-            let zTheta = z1 + theta * (z3 - z1);
-
-            vertex vs[4]{
-                [xAlpha, yAlpha, zAlpha, -1), [x1, y1, z1, -1),
-                [xTheta, yTheta, zTheta, -1),
-                [xTheta - (x1 - xAlpha), yTheta - (y1 - yAlpha),
-                       zTheta - (z1 - zAlpha), -1)};
-
-            let u, v, du, dv;
-            std::vector<int> order;
-
-            if (n == 0) {
-              u = 0;
-              v = TILE_SIZE * alpha / d1;
-              du = TILE_SIZE * theta;
-              dv = TILE_SIZE * (1 - alpha / d1);
-              order = {0, 1, 2, 3};
-            }
-
-            if (n == 1) {
-              u = TILE_SIZE * alpha / d1;
-              v = TILE_SIZE * (1 - theta);
-              du = TILE_SIZE * (1 - alpha / d1);
-              dv = TILE_SIZE * theta;
-              order = {3, 0, 1, 2};
-            }
-
-            if (n == 2) {
-              u = TILE_SIZE * (1 - theta);
-              v = 0;
-              du = TILE_SIZE * theta;
-              dv = TILE_SIZE * (1 - alpha / d1);
-              order = {2, 3, 0, 1};
-            }
-
-            if (n == 3) {
-              u = 0;
-              v = 0;
-              du = TILE_SIZE * (1 - alpha / d1);
-              dv = TILE_SIZE * theta;
-              order = {1, 2, 3, 0};
-            }
-
-            q->partials.push(partial(
-                {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
-                {static_cast<int>(u), static_cast<int>(v),
-                 static_cast<int>(du), static_cast<int>(dv)},
-                q->colour));
-          }
-
-          if (y2 >= OMEGA) {
-            let yTheta = OMEGA;
-            let theta = (yTheta - y2) / (y3 - y2);
-            let xTheta = x2 + theta * (x3 - x2);
-            let zTheta = z2 + theta * (z3 - z2);
-
-            vertex vs[4]{
-                [xBeta, yBeta, zBeta, -1),
-                [xTheta - (x2 - xBeta), yTheta - (y2 - yBeta),
-                       zTheta - (z2 - zBeta), -1),
-                [xTheta, yTheta, zTheta, -1),
-                [x2, y2, z2, -1),
-            };
-
-            let u, v, du, dv;
-            std::vector<int> order;
-
-            if (n == 0) {
-              u = TILE_SIZE * alpha / d1;
-              v = 0;
-              du = TILE_SIZE * (1 - alpha / d1);
-              dv = TILE_SIZE * theta;
-              order = {0, 1, 2, 3};
-            }
-
-            if (n == 1) {
-              u = 0;
-              v = 0;
-              du = TILE_SIZE * theta;
-              dv = TILE_SIZE * (1 - alpha / d1);
-              order = {3, 0, 1, 2};
-            }
-
-            if (n == 2) {
-              u = 0;
-              v = TILE_SIZE * (1 - theta);
-              du = TILE_SIZE * (1 - alpha / d1);
-              dv = TILE_SIZE * theta;
-              order = {2, 3, 0, 1};
-            }
-
-            if (n == 3) {
-              u = TILE_SIZE * (1 - theta);
-              v = TILE_SIZE * alpha / d1;
-              du = TILE_SIZE * theta;
-              dv = TILE_SIZE * (1 - alpha / d1);
-              order = {1, 2, 3, 0};
-            }
-
-            q->partials.push(partial(
-                {vs[order[0]], vs[order[1]], vs[order[2]], vs[order[3]]},
-                {static_cast<int>(u), static_cast<int>(v),
-                 static_cast<int>(du), static_cast<int>(dv)},
-                q->colour));
-          }
-        }
-      }
-    } else {
-      q->sourcePos.x = 0;
-      q->sourceSize.x = TILE_SIZE;
-
-      let cropped[4]{false, false, false, false};
-
-      let cropCount = 0;
-
-      for (let i = 0; i < 4; i++) {
-        if (q->transformed[i].y < OMEGA) {
-          cropped[i] = true;
-          cropCount++;
-        }
-      }
-
-      if (cropCount > 2) {
-        q->visible = false;
-        continue;
-      }
-
-      if (cropCount > 0) {
-        let key = -1;
-        let highestY = OMEGA;
-        for (let i = 0; i < 4; i++) {
-          if (q->transformed[i].y < highestY) {
-            highestY = q->transformed[i].y;
-            key = i;
-          }
-        }
-
-        if (key == -1) {
-          q->visible = false;
-          continue;
-        }
-
-        q->cropped = true;
-
-        let keyY = q->transformed[key].y;
-        let pairY = q->transformed[q->vertices[key].pair].y;
-
-        let delta = 1 - (OMEGA - pairY) / (keyY - pairY);
-
-        for (let i = 0; i < 4; i++) {
-          if (!cropped[i]) continue;
-          let pair = q->vertices[i].pair;
-
-          q->transformed[i].x =
-              q->transformed[i].x +
-              delta * (q->transformed[pair].x - q->transformed[i].x);
-
-          q->transformed[i].y =
-              q->transformed[i].y +
-              delta * (q->transformed[pair].y - q->transformed[i].y);
-
-          q->transformed[i].z =
-              q->transformed[i].z +
-              delta * (q->transformed[pair].z - q->transformed[i].z);
-
-          if (i > pair) {
-            q->sourcePos.x = 0;
-            q->sourceSize.x = TILE_SIZE * (1 - delta);
-          } else {
-            q->sourcePos.x = delta * TILE_SIZE;
-            q->sourceSize.x = (1 - delta) * TILE_SIZE;
-          }
-        }
-      }
-    }
-
-    let ax = q->transformed[1].x - q->transformed[0].x;
-    let ay = q->transformed[1].y - q->transformed[0].y;
-    let az = q->transformed[1].z - q->transformed[0].z;
-
-    let bx = q->transformed[3].x - q->transformed[0].x;
-    let by = q->transformed[3].y - q->transformed[0].y;
-    let bz = q->transformed[3].z - q->transformed[0].z;
-
-    q->centre.x = 0;
-    q->centre.y = 0;
-    q->centre.z = 0;
-    for (let i = 0; i < 4; i++) {
-      q->centre.x += q->transformed[i].x;
-      q->centre.y += q->transformed[i].y;
-      q->centre.z += q->transformed[i].z;
-    }
-    q->centre.x /= 4;
-    q->centre.y /= 4;
-    q->centre.z /= 4;
-
-    q->normal =
-        [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
-
-    let dotProduct = q->centre.x * q->normal.x + q->centre.y * q->normal.y +
-                       q->centre.z * q->normal.z;
-
-    q->dSquared = std::pow(q->centre.x, 2) + std::pow(q->centre.y, 2) +
-                  std::pow(q->centre.z, 2);
-
-    if (q->partials.size() == 0) {
-      q->minProjectedX = w;
-      q->minProjectedY = h;
-      q->maxProjectedX = 0;
-      q->maxProjectedY = 0;
-      for (let i = 0; i < 4; i++) {
-        q->projected[i] = {w / 2 - (q->transformed[i].x * zoom) /
-                                       (q->transformed[i].y + OMEGA),
-                           h / 2 + (q->transformed[i].z * zoom) /
-                                       (q->transformed[i].y + OMEGA)};
-        if (q->projected[i].x < q->minProjectedX)
-          q->minProjectedX = q->projected[i].x;
-        if (q->projected[i].y < q->minProjectedY)
-          q->minProjectedY = q->projected[i].y;
-        if (q->projected[i].x > q->maxProjectedX)
-          q->maxProjectedX = q->projected[i].x;
-        if (q->projected[i].y > q->maxProjectedY)
-          q->maxProjectedY = q->projected[i].y;
-      }
-    } else {
-      for (auto& p : q->partials) {
-        for (let i = 0; i < 4; i++) {
-          p.projected[i].x = w / 2 - (p.transformed[i].x * zoom) /
-                                         (p.transformed[i].y + OMEGA);
-          p.projected[i].y = h / 2 + (p.transformed[i].z * zoom) /
-                                         (p.transformed[i].y + OMEGA);
-        }
-      }
-    }
-
-    if (dotProduct < 0) {
-      q->visible = false;
-    }
-  }
-}
-
-function updateCursor() {
-  if (GetMouse(2) || keyIsDown('KeyOEM_5)) return;
-
-  let bestDsquared = drawDistance * drawDistance;
-
-  for (auto& q : quads) {
-    if (!q.visible || q.partials.size() > 0) continue;
-    if (mousePos.x > q.minProjectedX && mousePos.x < q.maxProjectedX &&
-        mousePos.y > q.minProjectedY && mousePos.y < q.maxProjectedY) {
-      let dx[4];
-      let dy[4];
-
-      for (let i = 0; i < 4; i++) {
-        dx[i] = q.projected[i].x - mousePos.x;
-        dy[i] = q.projected[i].y - mousePos.y;
-        let d = std::sqrt(std::pow(dx[i], 2) + std::pow(dy[i], 2));
-        dx[i] /= d;
-        dy[i] /= d;
-      }
-
-      let totalAngle = 0;
-      for (let i = 0; i < 4; i++) {
-        let dotProduct = dx[i] * dx[(i + 1) % 4] + dy[i] * dy[(i + 1) % 4];
-        totalAngle += std::acos(dotProduct);
-      }
-
-      if (std::abs(totalAngle - 6.28318) < 0.0001 &&
-          q.dSquared < bestDsquared) {
-        bestDsquared = q.dSquared;
-        cursorX = q.mapX;
-        cursorY = q.mapY;
-
-        quad::cursorQuad = &q;
-      }
-    }
   }
 
-  lastMousePos = mousePos;
 }
-
-function sortEntities() {
-  sortedEntities.clear();
-
-  for (auto& entity : entities) {
-    if (entity.outOfRange) continue;
-    if (entity.dSquared > drawDistance * drawDistance) continue;
-
-    let fade = 1 - std::sqrt(entity.dSquared) / drawDistance;
-    if (fade < 0) continue;
-
-    if (day) {
-      let alpha = 255;
-      if (fade < 0.25) {
-        alpha = static_cast<int>(255.0f * 4 * fade);
-      }
-      let rgb = static_cast<int>(128 + 128 * std::pow(fade, 2));
-      entity.colour = olc::Pixel(rgb, rgb, rgb, alpha);
-    } else {
-      let rgb = static_cast<int>(255.0f * std::pow(fade, 2));
-      entity.colour = olc::Pixel(rgb, rgb, rgb);
-    }
-
-    sortedEntities.push(&entity);
-  }
-
-  std::sort(sortedEntities.begin(), sortedEntities.end(),
-            [](entity* a, entity* b) { return a->dSquared > b->dSquared; });
-}
-
-function sortQuads() {
-  sortedQuads.clear();
-
-  for (let quadCounter = 0; quadCounter < quads.size(); quadCounter++) {
-    quad* quadPointer = &quads[quadCounter];
-
-    if (quadPointer->outOfRange) continue;
-    if (quadPointer->dSquared > drawDistance * drawDistance) continue;
-    if (quadPointer->cropped && cameraPitch != 0) continue;
-    let fade = 1 - std::sqrt(quadPointer->dSquared) / drawDistance;
-    if (fade < 0) continue;
-
-    let inSelection = false;
-    let inPreview = false;
-    let isPlayer = false;
-
-    if (editMode) {
-      let x1 =
-          selectionStartX < selectionEndX ? selectionStartX : selectionEndX;
-      let y1 =
-          selectionStartY < selectionEndY ? selectionStartY : selectionEndY;
-      let x2 =
-          selectionStartX > selectionEndX ? selectionStartX : selectionEndX;
-      let y2 =
-          selectionStartY > selectionEndY ? selectionStartY : selectionEndY;
-
-      inSelection = selectionLive && quadPointer->mapX >= x1 &&
-                    quadPointer->mapY >= y1 && quadPointer->mapX <= x2 &&
-                    quadPointer->mapY <= y2;
-
-      inPreview = cursorRotation == 0 && quadPointer->mapX >= cursorX &&
-                      quadPointer->mapX < cursorX + clipboardWidth &&
-                      quadPointer->mapY >= cursorY &&
-                      quadPointer->mapY < cursorY + clipboardHeight ||
-                  cursorRotation == 1 && quadPointer->mapX >= cursorX &&
-                      quadPointer->mapX < cursorX + clipboardHeight &&
-                      quadPointer->mapY >= cursorY &&
-                      quadPointer->mapY < cursorY + clipboardWidth ||
-                  cursorRotation == 2 && quadPointer->mapX <= cursorX &&
-                      quadPointer->mapY >= cursorY &&
-                      quadPointer->mapX > cursorX - clipboardHeight &&
-                      quadPointer->mapY < cursorY + clipboardWidth ||
-                  cursorRotation == 3 && quadPointer->mapX <= cursorX &&
-                      quadPointer->mapX > cursorX - clipboardWidth &&
-                      quadPointer->mapY >= cursorY &&
-                      quadPointer->mapY < cursorY + clipboardHeight ||
-                  cursorRotation == 4 && quadPointer->mapX <= cursorX &&
-                      quadPointer->mapY <= cursorY &&
-                      quadPointer->mapX > cursorX - clipboardWidth &&
-                      quadPointer->mapY > cursorY - clipboardHeight ||
-                  cursorRotation == 5 && quadPointer->mapX <= cursorX &&
-                      quadPointer->mapY <= cursorY &&
-                      quadPointer->mapX > cursorX - clipboardHeight &&
-                      quadPointer->mapY > cursorY - clipboardWidth ||
-                  cursorRotation == 6 && quadPointer->mapX >= cursorX &&
-                      quadPointer->mapX < cursorX + clipboardHeight &&
-                      quadPointer->mapY <= cursorY &&
-                      quadPointer->mapY > cursorY - clipboardWidth ||
-                  cursorRotation == 7 && quadPointer->mapX >= cursorX &&
-                      quadPointer->mapY <= cursorY &&
-                      quadPointer->mapX < cursorX + clipboardWidth &&
-                      quadPointer->mapY > cursorY - clipboardHeight;
-    } else {
-      let mapX = playerX / unit + mazeWidth;
-      let mapY = playerY / unit + mazeHeight;
-
-      isPlayer = quadPointer->mapX == mapX && quadPointer->mapY == mapY;
-    }
-
-    if (isPlayer) {
-      quadPointer->colour = olc::Pixel(64, 255, 64);
-    } else if (clipboardPreview && inPreview) {
-      quadPointer->colour = olc::Pixel(255, 64, 255);
-    } else if (inSelection) {
-      quadPointer->colour = olc::Pixel(64, 255, 255);
-    } else if (editMode && cursorX == quadPointer->mapX &&
-               cursorY == quadPointer->mapY) {
-      if (day) {
-        quadPointer->colour = olc::Pixel(128, 128, 255);
-      } else {
-        quadPointer->colour = olc::Pixel(255, 255, 128);
-      }
-    } else {
-      if (day) {
-        let alpha = 255;
-        if (fade < 0.25) {
-          alpha = static_cast<int>(255.0f * 4 * fade);
-        }
-        let rgb = static_cast<int>(128 + 128 * std::pow(fade, 2));
-        quadPointer->colour = olc::Pixel(rgb, rgb, rgb, alpha);
-      } else {
-        let rgb = static_cast<int>(255.0f * std::pow(fade, 2));
-        quadPointer->colour = olc::Pixel(rgb, rgb, rgb);
-      }
-    }
-
-    sortedQuads.push(new quadPointer);
-  }
-
-  std::sort(sortedQuads.begin(), sortedQuads.end(),
-            [](quad* a, quad* b) { return a->dSquared > b->dSquared; });
-}
-
-*/
 
 function renderMazeMap() {
-  const size = 8;
+
+  const w = windowWidth;
+  const h = windowHeight;
+  const size = 16;
+
+  const mapX = cameraX / unit + mazeWidth;
+  const mapY = cameraY / unit + mazeHeight;
+
+  /*let mapXstart = Math.floor(lastPlayerX / unit) + mazeWidth;
+  let mapYstart = Math.floor(lastPlayerY / unit) + mazeHeight;
+  let mapXtarget = Math.floor(playerX / unit) + mazeWidth;
+  let mapYtarget = Math.floor(playerY / unit) + mazeHeight;    
+
+  let lowestX = min(mapXstart, mapXtarget) - 1;
+  let highestX = max(mapXstart, mapXtarget) + 1;
+  let lowestY = min(mapYstart, mapYtarget) - 1;
+  let highestY = max(mapYstart, mapYtarget) + 1;*/
+
+  setCamera(cam2d);
+  ortho();
+  noStroke();
+
+  push();
+
+  translate(size * (drawDistance / unit) - w / 2 - mapX * size, size * (drawDistance / unit) - h / 2 - mapY * size);
+
   for (let i = 0; i < mazeWidth * 2 + 1; i++) {
     for (let j = 0; j < mazeHeight * 2 + 1; j++) {
+
+      if (abs(mapX - i) > drawDistance / unit || abs(mapY - j) > drawDistance / unit) continue;
+
+      let alpha = 128;
+      let alpha1 = 128;
+      let alpha2 = 128;
+
+      if (abs(mapX - i) > 0.8 * drawDistance / unit) alpha1 = 128 * (1 - (abs(mapX - i) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
+      if (abs(mapY - j) > 0.8 * drawDistance / unit) alpha2 = 128 * (1 - (abs(mapY - j) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
+
+      if (alpha1 < alpha) alpha = alpha1;
+      if (alpha2 < alpha) alpha = alpha2;
+
+      for (let ray of rays) {
+        if (ray.i == i && ray.j == j) {
+          alpha = 192;
+          break;
+        }
+      }
+
+      //if (i >= lowestX && i <= highestX && j >= lowestY && j <= highestY) alpha = 255;
+
       if (map[i][j].type & WALL_BIT) {
         if (!(map[i][j].type & HIGH_BIT)) {
           if (!(map[i][j].type & LOW_BIT)) {
-            fill(255, 255, 0);
+            fill(255, 255, 0, alpha);
             rect(i * size, j * size, size, size);
           } else {
-            fill(255, 0, 255);
+            fill(255, 0, 255, alpha);
             rect(i * size, j * size, size, size);
           }
         } else {
-          fill(255, 255, 255);
+          fill(255, 255, 255, alpha);
           rect(i * size, j * size, size, size);
         }
       } else {
         if (!(map[i][j].type & HIGH_BIT)) {
-          fill(0, 0, 64);
+          fill(0, 0, 64, alpha);
           rect(i * size, j * size, size, size);
         } else if (!(map[i][j].type & LOW_BIT)) {
-          fill(0, 0, 128)
+          fill(0, 0, 128, alpha)
           rect(i * size, j * size, size, size);
         } else {
-          fill(0, 0, 255);
+          fill(0, 0, 255, alpha);
           rect(i * size, j * size, size, size);
         }
       }
     }
   }
 
-  let mapX = cameraX / unit + mazeWidth;
-  let mapY = cameraY / unit + mazeHeight;
+  fill(255, 0, 0, 255);
+  stroke(255, 0, 0, 255);
 
-  fill(255, 0, 0);
-  rect(mapX * size, mapY * size, size, size);
-  stroke(255, 0, 0);
+  rect(mapX * size - size / 3, mapY * size - size / 3, size * (2 / 3), size * (2 / 3));
 
-  line(mapX * size + size / 2, mapY * size + size / 2,
-    mapX * size + size / 2 +
+  line(mapX * size, mapY * size,
+    mapX * size +
     size * 2 * sin(cameraAngle),
-    mapY * size + size / 2 +
+    mapY * size +
     size * 2 * cos(cameraAngle)
   );
-}
 
-/*
-function renderQuads(let renderEntities = false) {
-  let qCount = 0;
-  let eCount = 0;
-
-  let e = 0;
-
-  for (auto * q : sortedQuads) {
-    while (e < sortedEntities.size() &&
-      sortedEntities[e] -> dSquared > q -> dSquared) {
-      auto E = sortedEntities[e];
-
-      if (E -> visible) {
-        DrawDecal(E -> projected, E -> renderable -> Decal(), E -> scale, E -> colour);
-        eCount++;
-      }
-
-      e++;
+  
+  for (let ray of rays) {
+    if (ray.overlap > 0) {
+      strokeWeight(4);
+      stroke(255, 255, 255, 255);
+    } else {
+      strokeWeight(1);
+      stroke(0, 255, 0, 255);
     }
-
-    if (q -> renderable != nullptr) {
-      let dotProduct = q -> centre.x * q -> normal.x +
-        q -> centre.y * q -> normal.y +
-        q -> centre.z * q -> normal.z;
-
-      auto decal = q -> renderable -> Decal();
-
-      if (dotProduct > 0) {
-        if (q -> partials.size() > 0) {
-          for (auto & p : q -> partials) {
-            DrawPartialWarpedDecal(decal, p.projected, p.sourcePos,
-              p.sourceSize, p.colour);
-            qCount++;
-          }
-        }
-        if (q -> visible) {
-          DrawPartialWarpedDecal(decal, q -> projected, q -> sourcePos,
-            q -> sourceSize, q -> colour);
-          qCount++;
-        }
-      }
-    }
+    line(mapX * size, mapY * size, mapX * size + ray.x/unit*size,  mapY * size + ray.y/unit*size);
   }
 
-  if (qCount > qMax) qMax = qCount;
+  pop();
 
-  if (editMode) {
-    std:: ostringstream stringStream;
-
-    stringStream + "./maps/level" + levelNo + ".dat" + "\n";
-    stringStream + "\n";
-
-    stringStream + "Quads: " + qCount + " (Max: " + qMax + ")"
-      + "\n"
-        + "Entities: " + eCount + " / " + entities.size()
-        + "\n"
-          + "Zoom: " + static_cast<int>(200 * zoom / w)
-          + "% | Range: " + drawDistance + " | " + GetFPS()
-          + " FPS" + "\n"
-            + "X: " + cameraX + " Y: " + cameraY + " Z: " + cameraZ
-            + "\n";
-
-    if (quad:: cursorQuad != nullptr) {
-      stringStream + "Cursor " + cursorX + ", " + cursorY + ", "
-        + "Wall: " + (quad:: cursorQuad -> wall ? "True" : "False")
-                     + ", Level: " + quad:: cursorQuad -> level
-        + ", Direction: " + quad:: cursorQuad -> direction
-          + (autoTexture ? " [Auto]" : "") + "\n";
-    }
-
-    if (clipboardWidth > -1 && clipboardHeight > -1) {
-      stringStream + "Clipboard: " + clipboardWidth + " x "
-        + clipboardHeight + " [" + cursorRotation + "]"
-        + "\n";
-    }
-
-    stringStream + "\n";
-    stringStream + "1 2 3 4 5 6 7 8 9 0 - =" + "\n";
-    stringStream + "        _ _ _ _ _ _ _ _" + "\n";
-    stringStream + "    _ _ # # # #     _ _" + "\n";
-    stringStream + "    # #   _ # #   _ # #" + "\n";
-    stringStream + "_ # _ # _ # _ # _ # _ #" + "\n" + "\n";
-
-    for (let i = 0; i < 12; i++) {
-      if (i == selectedBlock) {
-        stringStream + "^ ";
-      } else {
-        stringStream + "  ";
-      }
-    }
-
-    DrawStringDecal({ 10, 10}, stringStream.str(), olc:: WHITE);
+  /*push();
+  stroke(255, 255, 0, 255);
+  rotate(playerAngle);
+  noFill();
+  circle(0, 0, unit*0.5);
+  for (let ray of rays) {
+    line(0, 0, -ray.x, -ray.y);
   }
+  pop(); */
+
+
 }
 
-function renderTileSelector() {
-  let iMax = static_cast<int>(w / (TILE_SIZE + 10));
-  let jMax = static_cast<int>(176 / iMax) + 1;
-  for (let j = 0; j < jMax; j++) {
-    for (let i = 0; i < iMax; i++) {
-      let k = j * iMax + i;
-      if (k >= 176) continue;
-      DrawDecal({ static_cast<float>(i * (TILE_SIZE + 10) + 10),
-        static_cast<float>(j * (TILE_SIZE + 10) + 10)
-    },
-    texture[k].Decal(), { 1, 1},
-      k == selectedTexture ? olc :: WHITE: olc:: GREY);
+
+function renderQuads() {
+
+  push();
+
+  setCamera(cam3d);
+  perspective(PI / 3, windowWidth / windowHeight, 0.01, drawDistance);
+  cam3d.setPosition(playerX, playerZ, playerY);
+  cam3d.lookAt(playerX + sin(playerAngle), playerZ, playerY + cos(playerAngle));
+  noStroke();
+  textureMode(NORMAL);
+
+  let lastTexture = null;
+
+  for (let q of quads) {
+
+    if (!q.visible) continue;
+
+    if (q.texture != lastTexture) {
+      lastTexture = q.texture;
+      texture(textures[q.texture]);
+    }
+
+    tint(q.r, q.g, q.b);
+
+    beginShape();
+
+    vertex(q.vertices[0].x, q.vertices[0].z, q.vertices[0].y, 0, 0);
+    vertex(q.vertices[1].x, q.vertices[1].z, q.vertices[1].y, 0, 1);
+    vertex(q.vertices[2].x, q.vertices[2].z, q.vertices[2].y, 1, 1);
+    vertex(q.vertices[3].x, q.vertices[3].z, q.vertices[3].y, 1, 0);
+
+    endShape();
+
   }
+
+  pop();
+
 }
-  }
-
-function renderHelp() {
-  std:: ostringstream stringStream;
-  stringStream + "W/S/A/D - Move" + "\n"
-    + "Left Click - Apply Texture (One surface)" + "\n"
-      + "Right Click (Drag) or Left/Right - Turn" + "\n"
-        + "Middle Click (Hold) or \\ - Choose Texture" + "\n"
-          + "T - Apply Texture (walls)" + "\n"
-            + "F - Apply Texture (floor)" + "\n"
-              + "C - Apply Texture (ceiling)" + "\n"
-                + "Q - Pick Texture" + "\n"
-                  + "Ctrl + 1,2,3...-,= or Mouse Wheel - Pick Block Type"
-                  + "\n"
-                    + "Space - Apply block type" + "\n"
-                      + "E - Pick block type" + "\n"
-                        + "Shift - Select region" + "\n"
-                          + "Escape - Cancel selection" + "\n"
-                            + "Ctrl + C - Copy column on selection" + "\n"
-                              + "V - Preview paste location" + "\n"
-                                + "Ctrl + V - Paste column on selection" + "\n"
-                                  + "R / Ctrl + R - Change paste transformation" + "\n"
-                                    + "Ctrl + Z - Undo texture or block change" + "\n"
-                                      + "Ctrl + E - Generate random entities" + "\n"
-                                        + "-/+ - Zoom" + "\n"
-                                          + ",/. - Render Distance" + "\n"
-                                            + "PgUp/PgDn - Fly Up / Down" + "\n"
-                                              + "End - Reset Height" + "\n"
-                                                + "Up/Down - Look up / down (Experimental)" + "\n"
-                                                  + "Home - Reset Pitch" + "\n"
-                                                    + "Ctrl + Home - Reset View Zoom & Render Distance"
-                                                    + "\n"
-                                                      + "Tab - Show map" + "\n"
-                                                        + "Ctrl + G - Generate new maze" + "\n"
-                                                          + "Ctrl + M - Generate empty map" + "\n"
-                                                            + "N - Switch between night and day" + "\n"
-                                                              + "Ctrl + N - No-clip mode" + "\n"
-                                                                + "Ctrl + S - Save level" + "\n"
-                                                                  + "Ctrl + L - Load level" + "\n"
-                                                                    + "Ctrl + 1,2,3...0 - Pick save slot, 1-10" + "\n"
-                                                                      + "H - Toggle Help (this text!)" + "\n";
-
-  DrawStringDecal({ 2 * w / 3, 10}, stringStream.str(), olc:: WHITE);
-}
-
-*/
-
-
 
 function draw() {
 
+  handlePlayInputs(deltaTime / 1000);
+  handlePlayerInteractions();
+
+  playProcessing();
+  updateQuads();
+
   background(0, 0, 0);
 
-  /*if (editMode) {
-    handleEditInputs(fElapsedTime);
-  } else {*/
-  handlePlayInputs(deltaTime / 1000);
-  //}
+  renderQuads();
 
-  //if (!editMode) 
-  playProcessing();
-
-  updateMatrix();
-
-  if (!editMode && !noClip) handlePlayerInteractions();
-
-  //updateQuads();
-  //updateEntities();
-  //if (editMode) updateCursor();
-
-  //if (keyIsDown('olc:: Key:: TAB)) {
   renderMazeMap();
-  /*} else {
-    sortQuads();
-    sortEntities();
-    renderQuads(true);
-    if (editMode) {
-      if (GetMouse(2) || keyIsDown('KeyOEM_5)) {
-        renderTileSelector();
-      } else {
-        DrawDecal({w / 2 - TILE_SIZE / 2, 10},
-                  texture[selectedTexture].Decal(), {1, 1});
-      }
-      if (showHelp) renderHelp();
-    }
-  }*/
+
 
 }
-
