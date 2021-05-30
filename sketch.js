@@ -7,6 +7,7 @@ const CEILING_BIT = 0b10000;
 const HIGH_BIT = 0b01000;
 const LOW_BIT = 0b00100;
 const WALL_BIT = 0b00010;
+const GROUND_BIT = 0b00001;
 
 const SKY = 0b00001;
 const SKY_SINGLE_BLOCK = 0b00011;
@@ -34,14 +35,11 @@ const mazeWidth = 40;
 const mazeHeight = 40;
 let drawDistance = 1000;
 
-let cameraAngle = 0;
-let cameraPitch = 0;
-let cameraX = unit / 2;
-let cameraY = unit / 2;
-let cameraZ = unit / 2;
-
-let playerX = 0, playerY = 0, playerZ = unit / 2, playerAngle, playerPitch = 0;
+let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAngle = 0, playerPitch = 0;
 let lastPlayerX, lastPlayerY;
+
+let cursorX = null, cursorY = null, cursorLevel, stepStack = [];
+let cursorTexture, cursorFloor, cursorWall, cursorType;
 
 let levelNo = 1;
 
@@ -59,11 +57,11 @@ let rays;
 
 function updateMatrix() {
   const m1 = [[1, 0, 0],
-  [0, cos(cameraPitch), sin(cameraPitch)],
-  [0, -sin(cameraPitch), cos(cameraPitch)]];
+  [0, cos(playerPitch), sin(playerPitch)],
+  [0, -sin(playerPitch), cos(playerPitch)]];
 
-  const m2 = [[cos(cameraAngle), -sin(cameraAngle), 0],
-  [sin(cameraAngle), cos(cameraAngle), 0],
+  const m2 = [[cos(playerAngle), -sin(playerAngle), 0],
+  [sin(playerAngle), cos(playerAngle), 0],
   [0, 0, 1]];
 
   for (let i = 0; i < 3; i++) {
@@ -87,7 +85,7 @@ function preload() {
     }
     map.push(row);
   }
-  
+
   for (let j = 0; j < MAX_HEIGHT; j++) {
     let row = [];
     for (let i = 0; i < MAX_WIDTH; i++) {
@@ -106,18 +104,10 @@ function setup() {
 
   angleMode(RADIANS);
 
-
   createCanvas(windowWidth, windowHeight, WEBGL);
 
   makeMaze();
   regenerateQuads();
-
-  playerX = cameraX;
-  playerY = cameraY;
-  playerZ = cameraZ;
-  playerAngle = cameraAngle;
-
-  cameraPitch = 0;
 
   cam2d = createCamera();
   cam3d = createCamera();
@@ -142,9 +132,9 @@ function mouseMoved() {
 }
 
 function setQuadTexture(x, y, id, wall, floor = false) {
-  if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeWidth) return 0;
+  if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeHeight) return 0;
   let setCount = 0;
-  for (let i = 0; i < quads.size(); i++) {
+  for (let i = 0; i < quads.length; i++) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
       if (wall == quads[i].wall) {
         if (!wall &&
@@ -173,47 +163,45 @@ function setQuadTexture(x, y, id, wall, floor = false) {
   return setCount;
 }
 
-class quadStruct {
-  constructor(p1, p2, p3, p4,
-    wall = false, mapX = 0, mapY = 0,
-    texture = -1, level = 0, direction = -1) {
+function quadStruct(p1, p2, p3, p4,
+  wall = false, mapX = 0, mapY = 0,
+  texture = -1, level = 0, direction = -1) {
 
-    if (p1 === undefined) p1 = [0, 0, 0];
-    if (p2 === undefined) p2 = [0, 0, 0];
-    if (p3 === undefined) p3 = [0, 0, 0];
-    if (p4 === undefined) p4 = [0, 0, 0];
+  if (p1 === undefined) p1 = [0, 0, 0];
+  if (p2 === undefined) p2 = [0, 0, 0];
+  if (p3 === undefined) p3 = [0, 0, 0];
+  if (p4 === undefined) p4 = [0, 0, 0];
 
-    this.texture = texture;
-    this.vertices = [
-      { x: p1[0], y: p1[1], z: p1[2] },
-      { x: p2[0], y: p2[1], z: p2[2] },
-      { x: p3[0], y: p3[1], z: p3[2] },
-      { x: p4[0], y: p4[1], z: p4[2] }
-    ];
+  this.texture = texture;
+  this.vertices = [
+    { x: p1[0], y: p1[1], z: p1[2] },
+    { x: p2[0], y: p2[1], z: p2[2] },
+    { x: p3[0], y: p3[1], z: p3[2] },
+    { x: p4[0], y: p4[1], z: p4[2] }
+  ];
 
-    this.visible = false;
+  this.visible = false;
 
-    this.mapX = mapX;
-    this.mapY = mapY;
+  this.mapX = mapX;
+  this.mapY = mapY;
 
-    this.dSquared = 0;
+  this.dSquared = 0;
 
-    this.wall = wall;
-    this.level = level;
-    this.direction = direction;
+  this.wall = wall;
+  this.level = level;
+  this.direction = direction;
 
-    this.r = 0;
-    this.g = 0;
-    this.b = 0;
+  this.r = 0;
+  this.g = 0;
+  this.b = 0;
 
-    this.centre = {
-      x: (this.vertices[0].x + this.vertices[1].x + this.vertices[2].x + this.vertices[3].x) / 4,
-      y: (this.vertices[0].y + this.vertices[1].y + this.vertices[2].y + this.vertices[3].y) / 4,
-      z: (this.vertices[0].z + this.vertices[1].z + this.vertices[2].z + this.vertices[3].z) / 4
-    };
+  this.centre = {
+    x: (this.vertices[0].x + this.vertices[1].x + this.vertices[2].x + this.vertices[3].x) / 4,
+    y: (this.vertices[0].y + this.vertices[1].y + this.vertices[2].y + this.vertices[3].y) / 4,
+    z: (this.vertices[0].z + this.vertices[1].z + this.vertices[2].z + this.vertices[3].z) / 4
+  };
 
 
-  }
 }
 
 function regenerateQuads() {
@@ -363,34 +351,29 @@ function rand() {
   return floor(random(0, 65535));
 }
 
-class kruskalCell {
-  constructor(set, right, down) {
-    this.set = set;
-    this.right = right;
-    this.down = down;
+function kruskalCell(set, right, down) {
+  this.set = set;
+  this.right = right;
+  this.down = down;
+}
+
+function mapCell(type, flat, wall) {
+  if (type === undefined) {
+    this.type = 0;
+  } else {
+    this.type = type;
   }
-};
-
-class mapCell {
-
-  constructor(type, flat, wall) {
-    if (type === undefined) {
-      this.type = 0;
-    } else {
-      this.type = type;
-    }
-    if (flat === undefined) {
-      this.flat = [0, 0, 0, 0];
-    } else {
-      this.flat = flat;
-    }
-    if (wall === undefined) {
-      this.wall = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
-    } else {
-      this.wall = wall;
-    }
-
+  if (flat === undefined) {
+    this.flat = [0, 0, 0, 0];
+  } else {
+    this.flat = flat;
   }
+  if (wall === undefined) {
+    this.wall = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+  } else {
+    this.wall = wall;
+  }
+
 }
 
 function kruskalStep() {
@@ -509,7 +492,7 @@ function makeMaze() {
     let rw = rand() % 10 + 5;
     let rh = rand() % 10 + 5;
     let x = rand() % (mazeWidth * 2 - rw);
-    let y = rand() % (mazeWidth * 2 - rh);
+    let y = rand() % (mazeHeight * 2 - rh);
     for (let i = x; i <= x + rw; i++) {
       for (let j = y; j <= y + rh; j++) {
         map[i][j].type = GENERATOR_ROOM;
@@ -671,8 +654,6 @@ function handlePlayerInteractions() {
 
           if (ray.overlap > 0) {
 
-            //console.log("overlap", overlap, "rayLength", rayLength);
-
             playerX -= ray.overlap * ray.x / ray.length;
             playerY -= ray.overlap * ray.y / ray.length;
 
@@ -690,22 +671,40 @@ function handlePlayerInteractions() {
 
 function updateQuads() {
 
-  cameraX = playerX;
-  cameraY = playerY;
-  cameraZ = playerZ;
-  cameraAngle = playerAngle;
-
   for (let quadCounter = 0; quadCounter < quads.length; quadCounter++) {
     let q = quads[quadCounter];
 
     q.visible = true;
 
-    let outOfRange = abs(q.vertices[0].x - cameraX) > drawDistance ||
-      abs(q.vertices[0].y - cameraY) > drawDistance;
+    let outOfRange = abs(q.vertices[0].x - playerX) > drawDistance ||
+      abs(q.vertices[0].y - playerY) > drawDistance;
 
     if (outOfRange) q.visible = false;
 
-    q.dSquared = pow(q.centre.x - cameraX, 2) + pow(q.centre.y - cameraY, 2) + pow(q.centre.z - cameraZ, 2);
+    q.r = 0;
+    q.g = 0;
+    q.b = 0;
+
+    q.dSquared = pow(q.centre.x - playerX, 2) + pow(q.centre.y - playerY, 2) + pow(q.centre.z - playerZ, 2);
+
+    if (cursorX === q.mapX && cursorY === q.mapY) {
+      q.r = 255;
+      q.g = 255;
+      q.b = 255;
+      continue;
+    }
+
+    /*let isStep = false;
+    for (let step of stepStack) {
+      if (step.x === q.mapX && step.y === q.mapY) {
+        q.r = 255;
+        q.g = 255;
+        q.b = 0;
+        isStep = true;
+        break;
+      }
+    }
+    if (isStep) continue;*/
 
     let d = 255 * (1 - sqrt(q.dSquared) / drawDistance);
     if (d > 255) d = 255;
@@ -717,6 +716,7 @@ function updateQuads() {
 
   }
 
+
 }
 
 function renderMazeMap() {
@@ -725,11 +725,16 @@ function renderMazeMap() {
   const h = windowHeight;
   const size = 8;
 
-  const mapX = cameraX / unit + mazeWidth;
-  const mapY = cameraY / unit + mazeHeight;
+  const mapX = playerX / unit + mazeWidth;
+  const mapY = playerY / unit + mazeHeight;
 
   setCamera(cam2d);
   ortho();
+
+  stroke(255, 255, 255);
+  line(-20, 0, 20, 0);
+  line(0, -20, 0, 20);
+
   noStroke();
 
   push();
@@ -793,9 +798,9 @@ function renderMazeMap() {
 
   line(mapX * size, mapY * size,
     mapX * size +
-    size * 2 * sin(cameraAngle),
+    size * 2 * sin(playerAngle),
     mapY * size +
-    size * 2 * cos(cameraAngle)
+    size * 2 * cos(playerAngle)
   );
 
   pop();
@@ -837,7 +842,201 @@ function renderQuads() {
 
   }
 
+  for (let step of stepStack) {
+    push();
+    translate((step.x - mazeWidth) * unit, step.z * unit, (step.y - mazeHeight) * unit);
+    if (step.cursor) {
+      fill(255, 0, 0);
+    } else {
+      fill(255, 255, 0);
+    }
+    sphere(3);
+    pop();
+
+  }
+
   pop();
+
+}
+
+function evaluateCursor() {
+
+  cursorX = null;
+  cursorY = null;
+  cursorLevel = null;
+
+  let storeStack = keyIsDown(80);
+
+  if (storeStack) {
+    stepStack = [];
+  }
+
+  const dx = sin(playerAngle) * cos(playerPitch);
+  const dy = cos(playerAngle) * cos(playerPitch);
+  const dz = sin(playerPitch);
+
+  let stepX = playerX / unit + mazeWidth;
+  let stepY = playerY / unit + mazeHeight;
+  let stepZ = playerZ / unit;
+
+  if (storeStack) {
+    stepStack.push({ x: stepX, y: stepY, z: stepZ });
+  }
+
+  for (let steps = 0; steps < 100; steps++) {
+
+    let toXedge = Infinity, toYedge = Infinity, toZedge = Infinity;
+
+    if (fract(stepX) === 0) {
+      toXedge = 1 / abs(dx);
+    } else {
+      if (dx > 0) {
+        toXedge = (1 - fract(stepX)) / dx;
+      } else if (dx < 0) {
+        toXedge = -fract(stepX) / dx;
+      }
+    }
+
+    if (fract(stepY) === 0) {
+      toYedge = 1 / abs(dy);
+    } else {
+      if (dy > 0) {
+        toYedge = (1 - fract(stepY)) / dy;
+      } else if (dy < 0) {
+        toYedge = -fract(stepY) / dy;
+      }
+    }
+
+    if (fract(stepZ) === 0) {
+      toZedge = 1 / abs(dz);
+    } else {
+      if (dz > 0) {
+        toZedge = (1 - fract(stepZ)) / dz;
+      } else if (dz < 0) {
+        toZedge = -fract(stepZ) / dz;
+      }
+    }
+
+    if (toXedge === Infinity && toYedge === Infinity && toZedge === Infinity) break;
+
+    if (toXedge <= toYedge && toXedge <= toZedge) {
+
+      stepX += dx * toXedge;
+      stepY += dy * toXedge;
+      stepZ += dz * toXedge;
+
+    } else if (toYedge <= toXedge && toYedge <= toZedge) {
+
+      stepX += dx * toYedge;
+      stepY += dy * toYedge;
+      stepZ += dz * toYedge;
+
+    } else if (toZedge <= toXedge && toZedge <= toYedge) {
+
+      stepX += dx * toZedge;
+      stepY += dy * toZedge;
+      stepZ += dz * toZedge;
+
+    }
+
+    if (stepX < 0 || stepX > MAX_WIDTH * 2 + 1 ||
+      stepY < 0 || stepY > MAX_HEIGHT * 2 + 1) break;
+
+    let mapZ = floor(stepZ + dz * 0.001);
+
+    let INTERACTION_BIT;
+    let level = null;
+
+    if (mapZ > 0) {
+      INTERACTION_BIT = GROUND_BIT;
+    } else if (mapZ == 0) {
+      INTERACTION_BIT = WALL_BIT;
+      level = 0;
+    } else if (mapZ == -1) {
+      INTERACTION_BIT = LOW_BIT;
+      level = 1;
+    } else if (mapZ == -2) {
+      INTERACTION_BIT = HIGH_BIT;
+      level = 2;
+    } else {
+      INTERACTION_BIT = CEILING_BIT;
+    }
+
+    let mapX = floor(stepX + dx * 0.001);
+    let mapY = floor(stepY + dy * 0.001);
+
+    if (map[mapX] === undefined) break;
+    if (map[mapX][mapY] === undefined) break;
+
+    let isCursor = false;
+    if (map[mapX][mapY].type & INTERACTION_BIT || INTERACTION_BIT === CEILING_BIT) {
+      if (cursorX === null && cursorY === null) {
+        cursorX = mapX;
+        cursorY = mapY;
+        cursorLevel = level;
+        cursorType = map[mapX][mapY].type;
+
+        if (level !== null) {
+          cursorTexture = map[mapX][mapY].wall[level][0];
+        }
+
+        isCursor = true;
+      }
+    }
+
+    if (storeStack) {
+      stepStack.push({ x: stepX, y: stepY, z: stepZ, cursor: isCursor });
+    }
+
+  }
+
+}
+
+
+
+function keyPressed() {
+
+  if (cursorX !== null && cursorY !== null) {
+    switch (keyCode) {
+      case 187:
+        if (cursorLevel !== null) {
+          setQuadTexture(cursorX, cursorY, (cursorTexture + 1) % 176, true, false);
+        }
+        break;
+      case 189:
+        if (cursorLevel !== null) {
+          setQuadTexture(cursorX, cursorY, (cursorTexture + 175) % 176, true, false);
+        }
+        break;
+      case 49:
+        map[cursorX][cursorY].type = SKY;
+        break;
+      case 50:
+        map[cursorX][cursorY].type = SKY_SINGLE_BLOCK;
+        break;
+      case 51:
+        map[cursorX][cursorY].type = SKY_DOUBLE_BLOCK;
+        break;
+      case 52:
+        map[cursorX][cursorY].type = WALL;
+        break;
+      case 53:
+        map[cursorX][cursorY].type = CORRIDOR;
+        break;
+      case 54:
+        map[cursorX][cursorY].type = LOW_ROOM;
+        break;
+      case 55:
+        map[cursorX][cursorY].type = HIGH_ROOM;
+        break;
+      case 77:
+        makeMaze();
+        break;
+    }
+    if (keyCode < 187) {
+      regenerateQuads();
+    }
+  }
 
 }
 
@@ -847,12 +1046,12 @@ function draw() {
   handlePlayerInteractions();
 
   updateQuads();
+  evaluateCursor();
 
   background(0, 0, 0);
 
   renderQuads();
 
   renderMazeMap();
-
 
 }
