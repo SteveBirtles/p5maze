@@ -39,7 +39,7 @@ let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAn
 let lastPlayerX, lastPlayerY;
 
 let cursorX = null, cursorY = null, cursorLevel, stepStack = [];
-let cursorTexture, cursorFloor, cursorWall, cursorType;
+let cursorTexture, cursorFloor, cursorWall, cursorType, selectedTexture = 0;
 
 let levelNo = 1;
 
@@ -120,8 +120,12 @@ function mouseClicked() {
   requestPointerLock();
 }
 
+function mouseReleased() {
+  requestPointerLock();
+}
+
 function mouseMoved() {
-  if (fullscreen()) {
+  if (fullscreen() && !keyIsDown(CONTROL)) {
     playerAngle -= movedX / 500;
     if (playerAngle > PI) playerAngle -= 2 * PI;
     if (playerAngle < -PI) playerAngle += 2 * PI;
@@ -131,32 +135,41 @@ function mouseMoved() {
   }
 }
 
-function setQuadTexture(x, y, id, wall, floor = false) {
+function mouseDragged() {
+  mouseMoved();
+}
+
+function setQuadTexture(x, y, level, id, wall) {
+
+  console.log(x, y, level, id, wall);
+
   if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeHeight) return 0;
   let setCount = 0;
   for (let i = 0; i < quads.length; i++) {
     if (quads[i].mapX == x && quads[i].mapY == y) {
-      if (wall == quads[i].wall) {
-        if (!wall &&
-          (floor && quads[i].level != 0 || !floor && quads[i].level == 0))
-          continue;
-        quads[i].texture = id;
-        setCount++;
+      if (wall !== null) {
+        if (quads[i].wall && quads[i].level === level && quads[i].direction === wall) {
+          quads[i].texture = id;
+          setCount++;
+        }
+      } else {
+        if (!quads[i].wall && quads[i].level === level) {
+          quads[i].texture = id;
+          setCount++;
+        }
       }
     }
+
   }
 
-  if (wall) {
-    for (let f = 0; f < 3; f++) {
-      for (let d = 0; d < 4; d++) {
-        map[x][y].wall[f][d] = id;
-      }
+
+  if (wall === null) {
+    if (level >= 0 && level <= 3) {
+      map[x][y].flat[level] = id;
     }
   } else {
-    for (let f = 0; f < 4; f++) {
-      if (floor && f > 0) break;
-      if (!floor && f == 0) continue;
-      map[x][y].flat[f] = id;
+    if (level >= 0 && level <= 2) {
+      map[x][y].wall[level][wall] = id;
     }
   }
 
@@ -357,23 +370,10 @@ function kruskalCell(set, right, down) {
   this.down = down;
 }
 
-function mapCell(type, flat, wall) {
-  if (type === undefined) {
-    this.type = 0;
-  } else {
-    this.type = type;
-  }
-  if (flat === undefined) {
-    this.flat = [0, 0, 0, 0];
-  } else {
-    this.flat = flat;
-  }
-  if (wall === undefined) {
-    this.wall = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
-  } else {
-    this.wall = wall;
-  }
-
+function mapCell() {
+  this.type = 0;
+  this.flat = [0, 0, 0, 0];
+  this.wall = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
 }
 
 function kruskalStep() {
@@ -577,6 +577,18 @@ function handlePlayInputs(frameLength) {
     console.log("Stead on, son.");
   }
 
+  if (mouseIsPressed) {
+    if (keyIsDown(SHIFT)) {
+      setQuadTexture(cursorX, cursorY, cursorLevel, selectedTexture, cursorWall);
+    }
+    if (keyIsDown(CONTROL)) {
+
+      if (selectedTexture < 0) selectedTexture = 0;
+      if (selectedTexture > 175) selectedTexture = 175;
+    }
+  }
+
+
 }
 
 function handlePlayerInteractions() {
@@ -719,7 +731,7 @@ function updateQuads() {
 
 }
 
-function renderMazeMap() {
+function renderOverlay() {
 
   const w = windowWidth;
   const h = windowHeight;
@@ -734,6 +746,36 @@ function renderMazeMap() {
   stroke(255, 255, 255);
   line(-20, 0, 20, 0);
   line(0, -20, 0, 20);
+
+  push();
+
+  textureMode(NORMAL);
+
+  if (keyIsDown(CONTROL)) {
+
+    let size = floor(h / 16);
+
+    for (let i = 0; i < 14; i++) {
+      for (let j = 0; j < 14; j++) {
+        if (i + j * 14 > 175) continue;
+        texture(textures[i + j * 14]);
+        rect((i - 7) * size + 5, (j - 7) * size + 5, size - 10, size - 10);
+        if (mouseX > w / 2 + (i - 7) * size + 5 &&
+          mouseY > h / 2 + (j - 7) * size + 5 &&
+          mouseX < w / 2 + (i - 7) * size + (size - 5) &&
+          mouseY < h / 2 + (j - 7) * size + (size - 5)) {
+            selectedTexture = i + j * 14;
+        }
+      }
+    }
+
+  }
+
+  texture(textures[selectedTexture]);
+  rect(w / 2 - 100, -h / 2 + 20, 80, 80);
+
+
+  pop();
 
   noStroke();
 
@@ -864,6 +906,7 @@ function evaluateCursor() {
   cursorX = null;
   cursorY = null;
   cursorLevel = null;
+  cursorWall = null;
 
   let storeStack = keyIsDown(80);
 
@@ -949,6 +992,7 @@ function evaluateCursor() {
 
     if (mapZ > 0) {
       INTERACTION_BIT = GROUND_BIT;
+      level = 0;
     } else if (mapZ == 0) {
       INTERACTION_BIT = WALL_BIT;
       level = 0;
@@ -960,7 +1004,10 @@ function evaluateCursor() {
       level = 2;
     } else {
       INTERACTION_BIT = CEILING_BIT;
+      level = 3;
     }
+
+
 
     let mapX = floor(stepX + dx * 0.001);
     let mapY = floor(stepY + dy * 0.001);
@@ -976,8 +1023,28 @@ function evaluateCursor() {
         cursorLevel = level;
         cursorType = map[mapX][mapY].type;
 
+        if (fract(stepZ) !== 0) {
+          if (fract(stepX) === 0) {
+            if (dx > 0) {
+              cursorWall = 3;
+            } else if (dx < 0) {
+              cursorWall = 1;
+            }
+          } else if (fract(stepY) === 0) {
+            if (dy > 0) {
+              cursorWall = 0;
+            } else if (dy < 0) {
+              cursorWall = 2;
+            }
+          }
+        }
+
         if (level !== null) {
-          cursorTexture = map[mapX][mapY].wall[level][0];
+          if (cursorWall !== null && level >= 0 && level <= 2) {
+            cursorTexture = map[mapX][mapY].wall[level][cursorWall];
+          } else if (level >= 0 && level <= 3) {
+            cursorTexture = map[mapX][mapY].flat[level];
+          }
         }
 
         isCursor = true;
@@ -993,19 +1060,25 @@ function evaluateCursor() {
 }
 
 
+function keyReleased() {
+  if (keyCode === CONTROL) requestPointerLock();
+}
+
 
 function keyPressed() {
 
+  if (keyCode === CONTROL) exitPointerLock();
+
   if (cursorX !== null && cursorY !== null) {
     switch (keyCode) {
-      case 187:
+      case 187: // +
         if (cursorLevel !== null) {
-          setQuadTexture(cursorX, cursorY, (cursorTexture + 1) % 176, true, false);
+          setQuadTexture(cursorX, cursorY, cursorLevel, (cursorTexture + 1) % 176, cursorWall);
         }
         break;
-      case 189:
+      case 189: // -
         if (cursorLevel !== null) {
-          setQuadTexture(cursorX, cursorY, (cursorTexture + 175) % 176, true, false);
+          setQuadTexture(cursorX, cursorY, cursorLevel, (cursorTexture + 175) % 176, cursorWall);
         }
         break;
       case 49:
@@ -1052,6 +1125,6 @@ function draw() {
 
   renderQuads();
 
-  renderMazeMap();
+  renderOverlay();
 
 }
