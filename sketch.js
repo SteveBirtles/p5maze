@@ -35,6 +35,8 @@ const mazeWidth = 40;
 const mazeHeight = 40;
 let drawDistance = 1000;
 
+let mapName = null, allMapNames = [];
+
 let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAngle = 0, playerPitch = 0;
 let lastPlayerX, lastPlayerY;
 
@@ -48,32 +50,19 @@ let quads = [];
 let sortedQuads = [];
 let map = [];
 let kruskalMaze = [];
+let rays;
 
 let cam3d;
 let cam2d;
 
 p5.disableFriendlyErrors = true;
 
-let rays;
-
-function updateMatrix() {
-  const m1 = [[1, 0, 0],
-  [0, cos(playerPitch), sin(playerPitch)],
-  [0, -sin(playerPitch), cos(playerPitch)]];
-
-  const m2 = [[cos(playerAngle), -sin(playerAngle), 0],
-  [sin(playerAngle), cos(playerAngle), 0],
-  [0, 0, 1]];
-
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      m[i][j] =
-        m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j] + m1[i][2] * m2[2][j];
-    }
-  }
-}
+let inconsolata;
 
 function preload() {
+ 
+
+  inconsolata = loadFont('fonts/inconsolata.otf');
 
   for (let i = 0; i < 176; i++) {
     textures.push(loadImage("tiles/tile" + i + ".png"));
@@ -93,6 +82,12 @@ function preload() {
       row.push(new kruskalCell(0, false, false));
     }
     kruskalMaze.push(row);
+  }
+
+  allMapNames = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    if (localStorage.key(i).startsWith("#")) continue;
+    allMapNames.push(localStorage.key(i));
   }
 
 }
@@ -908,6 +903,26 @@ function renderOverlay() {
   setCamera(cam2d);
   ortho();
 
+  textSize(24);
+  textFont(inconsolata);
+  textAlign(CENTER, TOP);
+
+  fill(255, 255, 255);
+
+  if (mapName !== null) {
+    text(mapName, 0, -h / 2 + 5);
+  } else {
+    text("{untitled}", 0, -h / 2 + 5);
+  }
+
+  let m = 30;
+  textSize(14);
+  for (let n of allMapNames) {
+    fill(128, 128, 128);
+    text(n, 0, -h / 2 + m);
+    m += 15;
+  }
+
   stroke(255, 255, 255);
   line(-20, 0, 20, 0);
   line(0, -20, 0, 20);
@@ -1280,6 +1295,68 @@ function keyPressed() {
 
     switch (keyCode) {
 
+      case 189: // -
+        drawDistance -= unit;
+        if (drawDistance < unit * 5) drawDistance = unit * 5;
+        break;
+      case 187: // =
+        drawDistance += unit;
+        if (drawDistance > (mazeWidth / 2) * unit) drawDistance = (mazeWidth / 2) * unit;
+        break;
+
+      case 78: // n
+        if (keyIsDown(ALT)) {
+          removeItem("#mapname");
+          mapName = null;
+          clearMap();
+          regenerateQuads();
+        }
+        break;
+
+      case 77: // m
+        if (keyIsDown(ALT)) {
+          removeItem("#mapname");
+          mapName = null;
+          makeMaze();
+          regenerateQuads();
+        }
+        break;
+
+      case 83: // s
+        if (keyIsDown(ALT)) {
+          let candidateMapName = prompt("Enter map name");
+          if (candidateMapName !== null) {
+            mapName = candidateMapName;
+            localStorage.setItem("#mapname", mapName);
+            let data = LZString.compress(JSON.stringify(map));
+            localStorage.setItem(mapName, data);
+            allMapNames = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              if (localStorage.key(i).startsWith("#")) continue;
+              allMapNames.push(localStorage.key(i));
+            }
+          }
+        }
+        break;
+
+      case 76: // l
+        if (keyIsDown(ALT)) {
+          let candidateMapName = prompt("Enter map name");
+          if (candidateMapName !== null) {
+            let candidateMap = localStorage.getItem(candidateMapName);
+            if (candidateMap !== null) {
+              mapName = candidateMapName;
+              localStorage.setItem("#mapname", mapName);
+              let data = localStorage.getItem(mapName);
+              map = JSON.parse(LZString.decompress(data));
+              regenerateQuads();
+            } else {
+              alert("No map with that name");
+            }
+          }
+        }
+        break;
+
       case SHIFT:
         if (markerY !== null || markerY !== null) {
           markerX = null;
@@ -1309,9 +1386,6 @@ function keyPressed() {
         break;
       case 55: // 7
         changeType = HIGH_ROOM;
-        break;
-      case 77: // m
-        makeMaze();
         break;
     }
 
