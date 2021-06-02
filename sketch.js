@@ -55,12 +55,15 @@ let rays;
 let cam3d;
 let cam2d;
 
+let illuminate = false;
+
 p5.disableFriendlyErrors = true;
 
 let inconsolata;
+let framerateStack = [];
 
 function preload() {
- 
+
 
   inconsolata = loadFont('fonts/inconsolata.otf');
 
@@ -110,9 +113,7 @@ function setup() {
   setCamera(cam3d);
 
 }
-
 function mouseClicked() {
-  if (!fullscreen()) fullscreen(true);
   requestPointerLock();
 }
 
@@ -124,7 +125,7 @@ function mouseMoved() {
 
   if (cursorLock > 0) cursorLock--;
 
-  if (fullscreen() && !keyIsDown(69)) {
+  if (!keyIsDown(69)) {
     playerAngle -= movedX / 500;
     if (playerAngle > PI) playerAngle -= 2 * PI;
     if (playerAngle < -PI) playerAngle += 2 * PI;
@@ -206,6 +207,7 @@ function quadStruct(p1, p2, p3, p4,
   this.r = 0;
   this.g = 0;
   this.b = 0;
+  this.a = 0;
 
   this.centre = {
     x: (this.vertices[0].x + this.vertices[1].x + this.vertices[2].x + this.vertices[3].x) / 4,
@@ -646,99 +648,68 @@ function mouseWheel(event) {
 
   if (cursorX === null || cursorY === null) return;
 
+  let x0, y0, x1, y1;
+
+  if (markerY !== null && markerY !== null) {
+    x0 = min(cursorX, markerX);
+    y0 = min(cursorY, markerY);
+    x1 = max(cursorX, markerX) + 1;
+    y1 = max(cursorY, markerY) + 1;
+
+  } else {
+
+    x0 = cursorX;
+    y0 = cursorY;
+    x1 = cursorX;
+    y1 = cursorY;
+
+  }
+
   if (event.delta > 0) {
 
-    if (markerY !== null && markerY !== null) {
-      let x0 = min(cursorX, markerX);
-      let y0 = min(cursorY, markerY);
-      let x1 = max(cursorX, markerX) + 1;
-      let y1 = max(cursorY, markerY) + 1;
-      for (let x = x0; x < x1; x++) {
-        for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      for (let y = y0; y < y1; y++) {
 
-          switch (map[x][y].type) {
-            case WALL:
-              break;
-            case HIGH_ROOM:
-              map[x][y].type = LOW_ROOM;
-              break;
-            case CORRIDOR:
-              map[x][y].type = WALL;
-              break;
-            case LOW_ROOM:
-              map[x][y].type = CORRIDOR;
-              break;
-            default:
-              map[x][y].type = HIGH_ROOM;
-          }
-
+        switch (map[x][y].type) {
+          case WALL:
+            break;
+          case HIGH_ROOM:
+            map[x][y].type = LOW_ROOM;
+            break;
+          case CORRIDOR:
+            map[x][y].type = WALL;
+            break;
+          case LOW_ROOM:
+            map[x][y].type = CORRIDOR;
+            break;
+          default:
+            map[x][y].type = HIGH_ROOM;
         }
-      }
-    } else {
 
-      switch (map[cursorX][cursorY].type) {
-        case WALL:
-          break;
-        case HIGH_ROOM:
-          map[cursorX][cursorY].type = LOW_ROOM;
-          break;
-        case CORRIDOR:
-          map[cursorX][cursorY].type = WALL;
-          break;
-        case LOW_ROOM:
-          map[cursorX][cursorY].type = CORRIDOR;
-          break;
-        default:
-          map[cursorX][cursorY].type = HIGH_ROOM;
       }
-
     }
 
   } else if (event.delta < 0) {
 
-    if (markerY !== null && markerY !== null) {
-      let x0 = min(cursorX, markerX);
-      let y0 = min(cursorY, markerY);
-      let x1 = max(cursorX, markerX) + 1;
-      let y1 = max(cursorY, markerY) + 1;
-      for (let x = x0; x < x1; x++) {
-        for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      for (let y = y0; y < y1; y++) {
 
-
-          switch (map[x][y].type) {
-            case HIGH_ROOM:
-              break;
-            case WALL:
-              map[x][y].type = CORRIDOR;
-              break;
-            case CORRIDOR:
-              map[x][y].type = LOW_ROOM;
-              break;
-            case LOW_ROOM:
-              map[x][y].type = HIGH_ROOM;
-              break;
-            default:
-              map[x][y].type = SKY;
-          }
-
+        switch (map[x][y].type) {
+          case HIGH_ROOM:
+            break;
+          case WALL:
+            map[x][y].type = CORRIDOR;
+            break;
+          case CORRIDOR:
+            map[x][y].type = LOW_ROOM;
+            break;
+          case LOW_ROOM:
+            map[x][y].type = HIGH_ROOM;
+            break;
+          default:
+            map[x][y].type = SKY;
         }
-      }
-    } else {
 
-      switch (map[cursorX][cursorY].type) {
-        case HIGH_ROOM:
-          break;
-        case WALL:
-          map[cursorX][cursorY].type = CORRIDOR;
-          break;
-        case CORRIDOR:
-          map[cursorX][cursorY].type = LOW_ROOM;
-          break;
-        case LOW_ROOM:
-          map[cursorX][cursorY].type = HIGH_ROOM;
-          break;
-        default:
-          map[cursorX][cursorY].type = SKY;
       }
 
     }
@@ -856,6 +827,7 @@ function updateQuads() {
     q.r = 0;
     q.g = 0;
     q.b = 0;
+    q.a = 255;
 
     q.dSquared = pow(q.centre.x - playerX, 2) + pow(q.centre.y - playerY, 2) + pow(q.centre.z - playerZ, 2);
 
@@ -866,25 +838,25 @@ function updateQuads() {
       continue;
     }
 
-    /*let isStep = false;
-    for (let step of stepStack) {
-      if (step.x === q.mapX && step.y === q.mapY) {
-        q.r = 255;
-        q.g = 255;
-        q.b = 0;
-        isStep = true;
-        break;
-      }
-    }
-    if (isStep) continue;*/
-
     let d = 255 * (1 - sqrt(q.dSquared) / drawDistance);
+
+    if (illuminate) d *= 10;
+
     if (d > 255) d = 255;
     if (d <= 0) continue;
 
-    q.r = d;
-    q.g = d;
-    q.b = d;
+    if (illuminate) {
+      q.r = 255;
+      q.g = 255;
+      q.b = 255;
+      q.a = d;
+    } else {
+      q.r = d;
+      q.g = d;
+      q.b = d;
+      q.a = 255;
+    }
+
 
   }
 
@@ -903,23 +875,33 @@ function renderOverlay() {
   setCamera(cam2d);
   ortho();
 
-  textSize(24);
+  textSize(18);
   textFont(inconsolata);
-  textAlign(CENTER, TOP);
+
+  if (framerateStack.length > 30) framerateStack.shift();
+  framerateStack.push(frameRate());
+  let averageFPS = 0;
+  for (let f of framerateStack) averageFPS += f;
+  averageFPS /= framerateStack.length;
 
   fill(255, 255, 255);
 
+  textAlign(CENTER, TOP);
+  text(floor(averageFPS) + " FPS", 0, -h / 2 + 5);
+
+  textAlign(LEFT, TOP);
   if (mapName !== null) {
-    text(mapName, 0, -h / 2 + 5);
+    text(mapName, -w / 2, 5);
   } else {
-    text("{untitled}", 0, -h / 2 + 5);
+    text("{untitled}", -w / 2, 5);
   }
 
-  let m = 30;
+  fill(128, 128, 128);
+  let m = 25;
   textSize(14);
   for (let n of allMapNames) {
-    fill(128, 128, 128);
-    text(n, 0, -h / 2 + m);
+    if (n === mapName) continue;
+    text(n, -w / 2, m);
     m += 15;
   }
 
@@ -1051,7 +1033,7 @@ function renderQuads() {
       texture(textures[q.texture]);
     }
 
-    tint(q.r, q.g, q.b);
+    tint(q.r, q.g, q.b, q.a);
 
     beginShape();
 
@@ -1304,6 +1286,12 @@ function keyPressed() {
         if (drawDistance > (mazeWidth / 2) * unit) drawDistance = (mazeWidth / 2) * unit;
         break;
 
+      case 73:
+        if (keyIsDown(ALT)) {
+          illuminate = !illuminate; ``
+        }
+        break;
+
       case 78: // n
         if (keyIsDown(ALT)) {
           removeItem("#mapname");
@@ -1324,7 +1312,7 @@ function keyPressed() {
 
       case 83: // s
         if (keyIsDown(ALT)) {
-          let candidateMapName = prompt("Enter map name");
+          let candidateMapName = prompt("Enter map name", mapName);
           if (candidateMapName !== null) {
             mapName = candidateMapName;
             localStorage.setItem("#mapname", mapName);
@@ -1341,7 +1329,7 @@ function keyPressed() {
 
       case 76: // l
         if (keyIsDown(ALT)) {
-          let candidateMapName = prompt("Enter map name");
+          let candidateMapName = prompt("Enter map name", mapName);
           if (candidateMapName !== null) {
             let candidateMap = localStorage.getItem(candidateMapName);
             if (candidateMap !== null) {
