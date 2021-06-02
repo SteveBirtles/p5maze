@@ -62,6 +62,22 @@ p5.disableFriendlyErrors = true;
 let inconsolata;
 let framerateStack = [];
 
+let toggles = {
+
+  handlePlayInputs: true,
+  handlePlayerInteractions: true,
+  updateQuads: true,
+  evaluateCursor: true,
+  background: true,
+  renderQuads: true,
+  renderOverlay: true,
+  mouseMoved: true,
+  mouseReleased: true,
+  dotProductTest: true
+
+}
+
+
 function preload() {
 
 
@@ -113,15 +129,17 @@ function setup() {
   setCamera(cam3d);
 
 }
-function mouseClicked() {
-  requestPointerLock();
-}
 
 function mouseReleased() {
+
+  if (!toggles.mouseReleased) return;
+
   requestPointerLock();
 }
 
 function mouseMoved() {
+
+  if (!toggles.mouseMoved) return;
 
   if (cursorLock > 0) cursorLock--;
 
@@ -634,13 +652,8 @@ function handlePlayInputs(frameLength) {
       if (selectedTexture > 175) selectedTexture = 175;
 
     }
-
-
-
-
-
+    
   }
-
 
 }
 
@@ -762,9 +775,6 @@ function handlePlayerInteractions() {
     map[mapXstart][mapYstart] === undefined ||
     map[mapXstart][mapYstart].type & INTERACTION_BIT) return;
 
-
-  //console.log(lowestX, highestX, ",", lowestY, highestY, "=", playerX, playerY);
-
   for (let i = lowestX; i <= highestX; i++) {
     for (let j = lowestY; j <= highestY; j++) {
 
@@ -814,22 +824,49 @@ function handlePlayerInteractions() {
 
 function updateQuads() {
 
+  const dx = sin(playerAngle) * cos(playerPitch);
+  const dy = cos(playerAngle) * cos(playerPitch);
+  const dz = sin(playerPitch);
+
   for (let quadCounter = 0; quadCounter < quads.length; quadCounter++) {
+
     let q = quads[quadCounter];
 
+    let nx = q.centre.x - playerX;
+    let ny = q.centre.y - playerY;
+    let nz = q.centre.z - playerZ;
+    let nd;
+
+    if (abs(nx) > drawDistance || abs(ny) > drawDistance) {
+      q.visible = false;
+      continue;
+    }
+
+    q.dSquared = pow(nx, 2) + pow(ny, 2) + pow(nz, 2);
+
+    nd = sqrt(q.dSquared);
+
+    if (toggles.dotProductTest && !(nd < 2 * unit)) {
+
+      nx /= nd;
+      ny /= nd;
+      nz /= nd;
+
+      let dotProduct = dx * nx + dy * ny + dz * nz;
+
+      if (dotProduct < 0) {
+        q.visible = false;
+        continue;
+      }
+
+    }
+
     q.visible = true;
-
-    let outOfRange = abs(q.vertices[0].x - playerX) > drawDistance ||
-      abs(q.vertices[0].y - playerY) > drawDistance;
-
-    if (outOfRange) q.visible = false;
 
     q.r = 0;
     q.g = 0;
     q.b = 0;
     q.a = 255;
-
-    q.dSquared = pow(q.centre.x - playerX, 2) + pow(q.centre.y - playerY, 2) + pow(q.centre.z - playerZ, 2);
 
     if (cursorX === q.mapX && cursorY === q.mapY) {
       q.r = 255;
@@ -838,7 +875,7 @@ function updateQuads() {
       continue;
     }
 
-    let d = 255 * (1 - sqrt(q.dSquared) / drawDistance);
+    let d = 255 * (1 - nd / drawDistance);
 
     if (illuminate) d *= 10;
 
@@ -857,7 +894,6 @@ function updateQuads() {
       q.a = 255;
     }
 
-
   }
 
 
@@ -875,7 +911,6 @@ function renderOverlay() {
   setCamera(cam2d);
   ortho();
 
-  textSize(18);
   textFont(inconsolata);
 
   if (framerateStack.length > 30) framerateStack.shift();
@@ -884,16 +919,29 @@ function renderOverlay() {
   for (let f of framerateStack) averageFPS += f;
   averageFPS /= framerateStack.length;
 
+  textAlign(RIGHT, TOP);
+  textSize(18);
   fill(255, 255, 255);
+  text(floor(averageFPS) + " FPS", w / 2 - 5, -h / 4 + 5);
+  let ty = 1;
+  for (let t of Object.keys(toggles)) {
+    if (toggles[t]) {
+      fill(0, 128, 0);
+      text("[" + ty + "] " + t + " on", w / 2 - 5, -h / 4 + ty * 15 + 10);
+    } else {
+      fill(255, 0, 0);
+      text("[" + ty + "] " + t + " off", w / 2 - 5, -h / 4 + ty * 15 + 10);
+    }
+    ty++;
+  }
 
-  textAlign(CENTER, TOP);
-  text(floor(averageFPS) + " FPS", 0, -h / 2 + 5);
-
+  fill(255, 255, 255);
   textAlign(LEFT, TOP);
+  textSize(18);
   if (mapName !== null) {
-    text(mapName, -w / 2, 5);
+    text(mapName, -w / 2, -h / 4 + 5);
   } else {
-    text("{untitled}", -w / 2, 5);
+    text("{untitled}", -w / 2, -h / 4 + 5);
   }
 
   fill(128, 128, 128);
@@ -901,7 +949,7 @@ function renderOverlay() {
   textSize(14);
   for (let n of allMapNames) {
     if (n === mapName) continue;
-    text(n, -w / 2, m);
+    text(n, -w / 2, -h / 4 + m);
     m += 15;
   }
 
@@ -1261,11 +1309,9 @@ function evaluateCursor() {
 
 }
 
-
 function keyReleased() {
   if (keyCode === 69) requestPointerLock();
 }
-
 
 function keyPressed() {
 
@@ -1355,26 +1401,70 @@ function keyPressed() {
         }
         break;
       case 49: // 1      
-        changeType = SKY;
+        if (keyIsDown(84)) {
+          toggles.handlePlayInputs = !toggles.handlePlayInputs;
+        } else {
+          changeType = SKY;
+        }
         break;
       case 50: // 2        
-        changeType = SKY_SINGLE_BLOCK;
+        if (keyIsDown(84)) {
+          toggles.handlePlayerInteractions = !toggles.handlePlayerInteractions;
+        } else {
+          changeType = SKY_SINGLE_BLOCK;
+        }
         break;
       case 51: // 3
-        changeType = SKY_DOUBLE_BLOCK;
+        if (keyIsDown(84)) {
+          toggles.updateQuads = !toggles.updateQuads;
+        } else {
+          changeType = SKY_DOUBLE_BLOCK;
+        }
         break;
       case 52: // 4
-        changeType = WALL;
+        if (keyIsDown(84)) {
+          toggles.evaluateCursor = !toggles.evaluateCursor;
+        } else {
+          changeType = WALL;
+        }
         break;
       case 53: // 5
-        changeType = CORRIDOR;
+        if (keyIsDown(84)) {
+          toggles.background = !toggles.background;
+        } else {
+          changeType = CORRIDOR;
+        }
         break;
       case 54: // 6
-        changeType = LOW_ROOM;
+        if (keyIsDown(84)) {
+          toggles.renderQuads = !toggles.renderQuads;
+        } else {
+          changeType = LOW_ROOM;
+        }
         break;
       case 55: // 7
-        changeType = HIGH_ROOM;
+        if (keyIsDown(84)) {
+          toggles.renderOverlay = !toggles.renderOverlay;
+        } else {
+          changeType = HIGH_ROOM;
+        }
         break;
+      case 56: // 8
+        if (keyIsDown(84)) {
+          toggles.mouseMoved = !toggles.mouseMoved;
+        }
+        break;
+      case 57: // 9        
+        if (keyIsDown(84)) {
+          toggles.mouseReleased = !toggles.mouseReleased;
+        }
+        break;
+      case 48: // 0        
+        if (keyIsDown(84)) {
+          toggles.dotProductTest = !toggles.dotProductTest;
+        }
+        break;
+
     }
 
     if (changeType !== null) {
@@ -1400,16 +1490,16 @@ function keyPressed() {
 
 function draw() {
 
-  handlePlayInputs(deltaTime / 1000);
-  handlePlayerInteractions();
+  if (toggles.handlePlayInputs) handlePlayInputs(deltaTime / 1000);
+  if (toggles.handlePlayerInteractions) handlePlayerInteractions();
 
-  updateQuads();
-  evaluateCursor();
+  if (toggles.updateQuads) updateQuads();
+  if (toggles.evaluateCursor) evaluateCursor();
 
-  background(0, 0, 0);
+  if (toggles.background) background(0, 0, 0);
 
-  renderQuads();
+  if (toggles.renderQuads) renderQuads();
 
-  renderOverlay();
+  if (toggles.renderOverlay) renderOverlay();
 
 }
