@@ -38,8 +38,9 @@ let drawDistance = 1000;
 let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAngle = 0, playerPitch = 0;
 let lastPlayerX, lastPlayerY;
 
-let cursorX = null, cursorY = null, cursorLevel, stepStack = [];
+let cursorX = null, cursorY = null, cursorLevel, cursorLock = 0;
 let cursorTexture, cursorFloor, cursorWall, cursorType, selectedTexture = 0;
+let markerX = null, markerY = null, stepStack = [];
 
 let levelNo = 1;
 
@@ -106,7 +107,7 @@ function setup() {
 
   createCanvas(windowWidth, windowHeight, WEBGL);
 
-  makeMaze();
+  clearMap();
   regenerateQuads();
 
   cam2d = createCamera();
@@ -125,7 +126,10 @@ function mouseReleased() {
 }
 
 function mouseMoved() {
-  if (fullscreen() && !keyIsDown(CONTROL)) {
+
+  if (cursorLock > 0) cursorLock--;
+
+  if (fullscreen() && !keyIsDown(69)) {
     playerAngle -= movedX / 500;
     if (playerAngle > PI) playerAngle -= 2 * PI;
     if (playerAngle < -PI) playerAngle += 2 * PI;
@@ -217,6 +221,35 @@ function quadStruct(p1, p2, p3, p4,
 
 }
 
+function clearMap() {
+  for (let i = -mazeWidth; i <= mazeWidth; i++) {
+    for (let j = -mazeHeight; j <= mazeHeight; j++) {
+      if (i == -mazeWidth || j == -mazeWidth || i == mazeWidth ||
+        j == mazeWidth) {
+        map[i + mazeWidth][j + mazeHeight].type = WALL;
+        for (let f = 0; f < 3; f++) {
+          for (let d = 0; d < 4; d++) {
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
+          }
+        }
+        for (let f = 0; f < 4; f++) {
+          map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
+        }
+      } else {
+        map[i + mazeWidth][j + mazeHeight].type = SKY;
+        for (let f = 0; f < 3; f++) {
+          for (let d = 0; d < 4; d++) {
+            map[i + mazeWidth][j + mazeHeight].wall[f][d] = DEFAULT_WALL;
+          }
+        }
+        for (let f = 0; f < 4; f++) {
+          map[i + mazeWidth][j + mazeHeight].flat[f] = DEFAULT_FLAT;
+        }
+      }
+    }
+  }
+}
+
 function regenerateQuads() {
 
   quads = [];
@@ -231,31 +264,6 @@ function regenerateQuads() {
       let y4 = y1 + unit;
       let x3 = x1 + (x2 - x1) + (x4 - x1);
       let y3 = y1 + (y2 - y1) + (y4 - y1);
-
-      /*if (map[i + mazeWidth][j + mazeHeight].type & CEILING_BIT) {  // ROOF (3, up)
-
-        quads.push(new quadStruct([x1, y1, -unit * 2, -1], [x2, y2, -unit * 2, -1],
-          [x3, y3, -unit * 2, -1], [x4, y4, -unit * 2, -1],
-          false, i + mazeWidth, j + mazeHeight,
-          map[i + mazeWidth][j + mazeHeight].flat[3], 3));
-
-      } else if (map[i + mazeWidth][j + mazeHeight].type & LOW_BIT &&
-        !(map[i + mazeWidth][j + mazeHeight].type & HIGH_BIT)) {  // DOUBLE BLOCK TOP (2, up)
-
-        quads.push(new quadStruct([x1, y1, -unit, -1], [x2, y2, -unit, -1],
-          [x3, y3, -unit, -1], [x4, y4, -unit, -1], false,
-          i + mazeWidth, j + mazeHeight,
-          map[i + mazeWidth][j + mazeHeight].flat[2], 2));
-
-      } else if (map[i + mazeWidth][j + mazeHeight].type & WALL_BIT &&
-        !(map[i + mazeWidth][j + mazeHeight].type & LOW_BIT)) {  // SINGLE BLOCK TOP (1, up)
-
-        quads.push(new quadStruct([x1, y1, 0, -1], [x2, y2, 0, -1],
-          [x3, y3, 0, -1], [x4, y4, 0, -1],
-          false, i + mazeWidth, j + mazeHeight,
-          map[i + mazeWidth][j + mazeHeight].flat[1], 1));
-
-      }*/
 
       if (map[i + mazeWidth][j + mazeHeight].type & LOW_BIT &&
         !(map[i + mazeWidth][j + mazeHeight].type & WALL_BIT)) {  // CORRIDOR CEILING (1, down)
@@ -577,17 +585,174 @@ function handlePlayInputs(frameLength) {
     console.log("Stead on, son.");
   }
 
-  if (mouseIsPressed) {
-    if (keyIsDown(SHIFT)) {
-      setQuadTexture(cursorX, cursorY, cursorLevel, selectedTexture, cursorWall);
+  if (keyIsDown(32)) { // space
+
+    if (markerY !== null && markerY !== null) {
+      let x0 = min(cursorX, markerX);
+      let y0 = min(cursorY, markerY);
+      let x1 = max(cursorX, markerX) + 1;
+      let y1 = max(cursorY, markerY) + 1;
+      for (let x = x0; x < x1; x++) {
+        for (let y = y0; y < y1; y++) {
+          if (keyIsDown(CONTROL)) {
+            for (let l = 0; l < 4; l++) {
+              setQuadTexture(x, y, l, selectedTexture, null);
+              if (l === 3) break;
+              for (let d = 0; d < 4; d++) {
+                setQuadTexture(x, y, l, selectedTexture, d);
+              }
+            }
+          } else {
+            setQuadTexture(x, y, cursorLevel, selectedTexture, cursorWall);
+          }
+        }
+      }
+
+    } else {
+      if (keyIsDown(CONTROL)) {
+        for (let l = 0; l < 4; l++) {
+          setQuadTexture(cursorX, cursorY, l, selectedTexture, null);
+          if (l === 3) break;
+          for (let d = 0; d < 4; d++) {
+            setQuadTexture(cursorX, cursorY, l, selectedTexture, d);
+          }
+        }
+      } else {
+        setQuadTexture(cursorX, cursorY, cursorLevel, selectedTexture, cursorWall);
+      }
     }
-    if (keyIsDown(CONTROL)) {
+
+  }
+
+
+  if (keyIsDown(81)) { // q
+    if (cursorTexture !== null) selectedTexture = cursorTexture;
+  }
+
+  if (mouseIsPressed) {
+
+    if (keyIsDown(69)) { // e
 
       if (selectedTexture < 0) selectedTexture = 0;
       if (selectedTexture > 175) selectedTexture = 175;
+
     }
+
+
+
+
+
   }
 
+
+}
+
+function mouseWheel(event) {
+
+  if (cursorX === null || cursorY === null) return;
+
+  if (event.delta > 0) {
+
+    if (markerY !== null && markerY !== null) {
+      let x0 = min(cursorX, markerX);
+      let y0 = min(cursorY, markerY);
+      let x1 = max(cursorX, markerX) + 1;
+      let y1 = max(cursorY, markerY) + 1;
+      for (let x = x0; x < x1; x++) {
+        for (let y = y0; y < y1; y++) {
+
+          switch (map[x][y].type) {
+            case WALL:
+              break;
+            case HIGH_ROOM:
+              map[x][y].type = LOW_ROOM;
+              break;
+            case CORRIDOR:
+              map[x][y].type = WALL;
+              break;
+            case LOW_ROOM:
+              map[x][y].type = CORRIDOR;
+              break;
+            default:
+              map[x][y].type = HIGH_ROOM;
+          }
+
+        }
+      }
+    } else {
+
+      switch (map[cursorX][cursorY].type) {
+        case WALL:
+          break;
+        case HIGH_ROOM:
+          map[cursorX][cursorY].type = LOW_ROOM;
+          break;
+        case CORRIDOR:
+          map[cursorX][cursorY].type = WALL;
+          break;
+        case LOW_ROOM:
+          map[cursorX][cursorY].type = CORRIDOR;
+          break;
+        default:
+          map[cursorX][cursorY].type = HIGH_ROOM;
+      }
+
+    }
+
+  } else if (event.delta < 0) {
+
+    if (markerY !== null && markerY !== null) {
+      let x0 = min(cursorX, markerX);
+      let y0 = min(cursorY, markerY);
+      let x1 = max(cursorX, markerX) + 1;
+      let y1 = max(cursorY, markerY) + 1;
+      for (let x = x0; x < x1; x++) {
+        for (let y = y0; y < y1; y++) {
+
+
+          switch (map[x][y].type) {
+            case HIGH_ROOM:
+              break;
+            case WALL:
+              map[x][y].type = CORRIDOR;
+              break;
+            case CORRIDOR:
+              map[x][y].type = LOW_ROOM;
+              break;
+            case LOW_ROOM:
+              map[x][y].type = HIGH_ROOM;
+              break;
+            default:
+              map[x][y].type = SKY;
+          }
+
+        }
+      }
+    } else {
+
+      switch (map[cursorX][cursorY].type) {
+        case HIGH_ROOM:
+          break;
+        case WALL:
+          map[cursorX][cursorY].type = CORRIDOR;
+          break;
+        case CORRIDOR:
+          map[cursorX][cursorY].type = LOW_ROOM;
+          break;
+        case LOW_ROOM:
+          map[cursorX][cursorY].type = HIGH_ROOM;
+          break;
+        default:
+          map[cursorX][cursorY].type = SKY;
+      }
+
+    }
+
+  }
+
+  regenerateQuads();
+
+  cursorLock = 3;
 
 }
 
@@ -751,7 +916,7 @@ function renderOverlay() {
 
   textureMode(NORMAL);
 
-  if (keyIsDown(CONTROL)) {
+  if (keyIsDown(69)) {
 
     let size = floor(h / 16);
 
@@ -764,7 +929,7 @@ function renderOverlay() {
           mouseY > h / 2 + (j - 7) * size + 5 &&
           mouseX < w / 2 + (i - 7) * size + (size - 5) &&
           mouseY < h / 2 + (j - 7) * size + (size - 5)) {
-            selectedTexture = i + j * 14;
+          selectedTexture = i + j * 14;
         }
       }
     }
@@ -854,7 +1019,7 @@ function renderQuads() {
   push();
 
   setCamera(cam3d);
-  perspective(PI / 3, windowWidth / windowHeight, 0.01, drawDistance);
+  perspective(PI / 3, windowWidth / windowHeight, 0.01, drawDistance * 2);
   cam3d.setPosition(playerX, playerZ, playerY);
   cam3d.lookAt(playerX + sin(playerAngle) * cos(playerPitch), playerZ + sin(playerPitch), playerY + cos(playerAngle) * cos(playerPitch));
   noStroke();
@@ -884,6 +1049,41 @@ function renderQuads() {
 
   }
 
+  if (markerX !== null && markerY !== null) {
+    for (let z = 1; z >= -2; z -= 0.25) {
+
+      let x0 = min(cursorX, markerX);
+      let y0 = min(cursorY, markerY);
+      let x1 = max(cursorX, markerX) + 1;
+      let y1 = max(cursorY, markerY) + 1;
+
+      push();
+      translate((x0 - mazeWidth) * unit, z * unit, (y0 - mazeHeight) * unit);
+      fill(0, 255, 0);
+      sphere(2);
+      pop();
+
+      push();
+      translate((x1 - mazeWidth) * unit, z * unit, (y0 - mazeHeight) * unit);
+      fill(0, 255, 0);
+      sphere(2);
+      pop();
+
+      push();
+      translate((x1 - mazeWidth) * unit, z * unit, (y1 - mazeHeight) * unit);
+      fill(0, 255, 0);
+      sphere(2);
+      pop();
+
+      push();
+      translate((x0 - mazeWidth) * unit, z * unit, (y1 - mazeHeight) * unit);
+      fill(0, 255, 0);
+      sphere(2);
+      pop();
+
+    }
+  }
+
   for (let step of stepStack) {
     push();
     translate((step.x - mazeWidth) * unit, step.z * unit, (step.y - mazeHeight) * unit);
@@ -894,7 +1094,6 @@ function renderQuads() {
     }
     sphere(3);
     pop();
-
   }
 
   pop();
@@ -902,6 +1101,14 @@ function renderQuads() {
 }
 
 function evaluateCursor() {
+
+  if (playerZ !== unit / 2) {
+    cursorX = null;
+    cursorY = null;
+    return;
+  }
+
+  if (cursorLock > 0) return;
 
   cursorX = null;
   cursorY = null;
@@ -1007,8 +1214,6 @@ function evaluateCursor() {
       level = 3;
     }
 
-
-
     let mapX = floor(stepX + dx * 0.001);
     let mapY = floor(stepY + dy * 0.001);
 
@@ -1061,54 +1266,72 @@ function evaluateCursor() {
 
 
 function keyReleased() {
-  if (keyCode === CONTROL) requestPointerLock();
+  if (keyCode === 69) requestPointerLock();
 }
 
 
 function keyPressed() {
 
-  if (keyCode === CONTROL) exitPointerLock();
+  if (keyCode === 69) exitPointerLock(); // e
 
   if (cursorX !== null && cursorY !== null) {
+
+    let changeType = null;
+
     switch (keyCode) {
-      case 187: // +
-        if (cursorLevel !== null) {
-          setQuadTexture(cursorX, cursorY, cursorLevel, (cursorTexture + 1) % 176, cursorWall);
+
+      case SHIFT:
+        if (markerY !== null || markerY !== null) {
+          markerX = null;
+          markerY = null;
+        } else {
+          markerX = cursorX;
+          markerY = cursorY;
         }
         break;
-      case 189: // -
-        if (cursorLevel !== null) {
-          setQuadTexture(cursorX, cursorY, cursorLevel, (cursorTexture + 175) % 176, cursorWall);
-        }
+      case 49: // 1      
+        changeType = SKY;
         break;
-      case 49:
-        map[cursorX][cursorY].type = SKY;
+      case 50: // 2        
+        changeType = SKY_SINGLE_BLOCK;
         break;
-      case 50:
-        map[cursorX][cursorY].type = SKY_SINGLE_BLOCK;
+      case 51: // 3
+        changeType = SKY_DOUBLE_BLOCK;
         break;
-      case 51:
-        map[cursorX][cursorY].type = SKY_DOUBLE_BLOCK;
+      case 52: // 4
+        changeType = WALL;
         break;
-      case 52:
-        map[cursorX][cursorY].type = WALL;
+      case 53: // 5
+        changeType = CORRIDOR;
         break;
-      case 53:
-        map[cursorX][cursorY].type = CORRIDOR;
+      case 54: // 6
+        changeType = LOW_ROOM;
         break;
-      case 54:
-        map[cursorX][cursorY].type = LOW_ROOM;
+      case 55: // 7
+        changeType = HIGH_ROOM;
         break;
-      case 55:
-        map[cursorX][cursorY].type = HIGH_ROOM;
-        break;
-      case 77:
+      case 77: // m
         makeMaze();
         break;
     }
-    if (keyCode < 187) {
+
+    if (changeType !== null) {
+      if (markerY !== null && markerY !== null) {
+        let x0 = min(cursorX, markerX);
+        let y0 = min(cursorY, markerY);
+        let x1 = max(cursorX, markerX) + 1;
+        let y1 = max(cursorY, markerY) + 1;
+        for (let x = x0; x < x1; x++) {
+          for (let y = y0; y < y1; y++) {
+            map[x][y].type = changeType;
+          }
+        }
+      } else {
+        map[cursorX][cursorY].type = changeType;
+      }
       regenerateQuads();
     }
+
   }
 
 }
