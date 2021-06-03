@@ -1,7 +1,8 @@
 "use strict";
 
-const DEFAULT_FLAT = 97;
-const DEFAULT_WALL = 154;
+const TEXTURE_COUNT = 40;
+const DEFAULT_FLAT = 25;
+const DEFAULT_WALL = 8;
 
 const CEILING_BIT = 0b10000;
 const HIGH_BIT = 0b01000;
@@ -88,8 +89,8 @@ function preload() {
 
   inconsolata = loadFont('fonts/inconsolata.otf');
 
-  for (let i = 0; i < 176; i++) {
-    textures.push(loadImage("tiles/tile" + i + ".png"));
+  for (let i = 0; i < TEXTURE_COUNT; i++) {
+    textures.push(loadImage("textures/" + (i+1) + ".jpg"));
   }
 
   for (let j = 0; j <= MAX_HEIGHT * 2 + 1; j++) {
@@ -725,7 +726,7 @@ function handlePlayInputs(frameLength) {
     if (keyIsDown(69)) { // e
 
       if (selectedTexture < 0) selectedTexture = 0;
-      if (selectedTexture > 175) selectedTexture = 175;
+      if (selectedTexture > TEXTURE_COUNT - 1) selectedTexture = TEXTURE_COUNT - 1;
 
     }
 
@@ -1059,7 +1060,7 @@ function renderOverlay() {
 
     for (let i = 0; i < 16; i++) {
       for (let j = 0; j < 16; j++) {
-        if (i + j * 16 > 175) continue;
+        if (i + j * 16 > TEXTURE_COUNT - 1) continue;
         texture(textures[i + j * 16]);
         rect((i - 7) * size + 5, (j - 7) * size + 5, size - 10, size - 10);
         if (mouseX > w / 2 + (i - 7) * size + 5 &&
