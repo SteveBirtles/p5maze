@@ -90,7 +90,7 @@ function preload() {
   inconsolata = loadFont('fonts/inconsolata.otf');
 
   for (let i = 0; i < TEXTURE_COUNT; i++) {
-    textures.push(loadImage("textures/" + (i+1) + ".jpg"));
+    textures.push(loadImage("textures/" + (i + 1) + ".jpg"));
   }
 
   for (let j = 0; j <= MAX_HEIGHT * 2 + 1; j++) {
@@ -127,7 +127,7 @@ function setup() {
 
   createCanvas(windowWidth, windowHeight, WEBGL);
 
-  clearMap();
+  makeMaze();
   regenerateQuads();
 
   cam2d = createCamera();
@@ -588,6 +588,10 @@ function makeMaze() {
     let rh = rand() % 10 + 5;
     let x = rand() % (mazeWidth * 2 - rw);
     let y = rand() % (mazeHeight * 2 - rh);
+    if (r === 0) {
+      playerX = (x + rw / 2 - mazeWidth) * unit;
+      playerY = (y + rh / 2 - mazeHeight) * unit;
+    }
     for (let i = x; i <= x + rw; i++) {
       for (let j = y; j <= y + rh; j++) {
         map[i][j].type = GENERATOR_ROOM;
@@ -605,6 +609,8 @@ function makeMaze() {
 }
 
 function handlePlayInputs(frameLength) {
+
+  if (keyIsDown(ALT)) return;
 
   lastPlayerX = playerX;
   lastPlayerY = playerY;
@@ -980,10 +986,6 @@ function renderOverlay() {
 
   const w = windowWidth;
   const h = windowHeight;
-  const size = 8;
-
-  const mapX = playerX / unit + mazeWidth;
-  const mapY = playerY / unit + mazeHeight;
 
   setCamera(cam2d);
   ortho();
@@ -1056,17 +1058,17 @@ function renderOverlay() {
 
   if (keyIsDown(69)) { // e
 
-    let size = floor(h / 16);
+    let thumbSize = floor(h / 16);
 
     for (let i = 0; i < 16; i++) {
       for (let j = 0; j < 16; j++) {
         if (i + j * 16 > TEXTURE_COUNT - 1) continue;
         texture(textures[i + j * 16]);
-        rect((i - 7) * size + 5, (j - 7) * size + 5, size - 10, size - 10);
-        if (mouseX > w / 2 + (i - 7) * size + 5 &&
-          mouseY > h / 2 + (j - 7) * size + 5 &&
-          mouseX < w / 2 + (i - 7) * size + (size - 5) &&
-          mouseY < h / 2 + (j - 7) * size + (size - 5)) {
+        rect((i - 7) * thumbSize + 5, (j - 7) * thumbSize + 5, thumbSize - 10, thumbSize - 10);
+        if (mouseX > w / 2 + (i - 7) * thumbSize + 5 &&
+          mouseY > h / 2 + (j - 7) * thumbSize + 5 &&
+          mouseX < w / 2 + (i - 7) * thumbSize + (thumbSize - 5) &&
+          mouseY < h / 2 + (j - 7) * thumbSize + (thumbSize - 5)) {
           selectedTexture = i + j * 16;
         }
       }
@@ -1077,26 +1079,44 @@ function renderOverlay() {
   texture(textures[selectedTexture]);
   rect(w / 2 - 100, -h / 2 + 20, 80, 80);
 
-
   pop();
 
-  noStroke();
+  renderMiniMap(keyIsDown(13));
+
+}
+
+function renderMiniMap(full) {
+
+  const w = windowWidth;
+  const h = windowHeight;
+  const size = 8;
+
+  const mapX = playerX / unit + mazeWidth;
+  const mapY = playerY / unit + mazeHeight;
 
   push();
 
-  translate(size * (drawDistance / unit) - w / 2 - mapX * size, size * (drawDistance / unit) - h / 2 - mapY * size);
+  noStroke();
+
+  if (!full) {
+    translate(size * (drawDistance / unit) - w / 2 - mapX * size, size * (drawDistance / unit) - h / 2 - mapY * size);
+  } else {
+    translate(-size * mazeWidth, -size * mazeHeight);  
+  }
 
   for (let i = 0; i < mazeWidth * 2 + 1; i++) {
     for (let j = 0; j < mazeHeight * 2 + 1; j++) {
 
-      if (abs(mapX - i) > drawDistance / unit || abs(mapY - j) > drawDistance / unit) continue;
+      if (!full && (abs(mapX - i) > drawDistance / unit || abs(mapY - j) > drawDistance / unit)) continue;
 
       let alpha = 128;
       let alpha1 = 128;
       let alpha2 = 128;
 
-      if (abs(mapX - i) > 0.8 * drawDistance / unit) alpha1 = 128 * (1 - (abs(mapX - i) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
-      if (abs(mapY - j) > 0.8 * drawDistance / unit) alpha2 = 128 * (1 - (abs(mapY - j) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
+      if (!full) {
+        if (abs(mapX - i) > 0.8 * drawDistance / unit) alpha1 = 128 * (1 - (abs(mapX - i) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
+        if (abs(mapY - j) > 0.8 * drawDistance / unit) alpha2 = 128 * (1 - (abs(mapY - j) - 0.8 * drawDistance / unit) / (0.2 * drawDistance / unit));
+      }
 
       if (alpha1 < alpha) alpha = alpha1;
       if (alpha2 < alpha) alpha = alpha2;
@@ -1421,181 +1441,225 @@ function keyPressed() {
     return;
   }
 
+  switch (keyCode) {
+
+    case 33: // page up
+
+      if (allMapNames.length > 0) {
+        selectedMap = selectedMap === -1 ? allMapNames.length - 1 : selectedMap - 1;
+      }
+
+      break;
+
+    case 34: // page down
+
+      if (allMapNames.length > 0) {
+        selectedMap = selectedMap === -1 ? 0 : selectedMap + 1;
+        if (selectedMap === allMapNames.length) selectedMap = -1;
+      }
+
+      break;
+
+    case 189: // -
+      drawDistance -= unit;
+      if (drawDistance < unit * 5) drawDistance = unit * 5;
+      break;
+    case 187: // =
+      drawDistance += unit;
+      if (drawDistance > (mazeWidth / 2) * unit) drawDistance = (mazeWidth / 2) * unit;
+      break;
+
+    case 73:
+      if (keyIsDown(ALT)) {
+        illuminate = !illuminate; ``
+      }
+      break;
+
+    case 82: // r
+      if (keyIsDown(ALT)) {
+
+        if (dirtyMap) {
+          let answer = confirm("Are you sure you want to randomize all textures?");
+          if (!answer) return;
+        }
+
+        for (let i = -mazeWidth; i <= mazeWidth; i++) {
+          for (let j = -mazeHeight; j <= mazeHeight; j++) {
+            if (i == -mazeWidth || j == -mazeWidth || i == mazeWidth ||
+              j == mazeWidth) {
+              for (let f = 0; f < 3; f++) {
+                for (let d = 0; d < 4; d++) {
+                  map[i + mazeWidth][j + mazeHeight].wall[f][d] = rand() % TEXTURE_COUNT;
+                }
+              }
+              for (let f = 0; f < 4; f++) {
+                map[i + mazeWidth][j + mazeHeight].flat[f] = rand() % TEXTURE_COUNT;
+              }
+            } else {
+              for (let f = 0; f < 3; f++) {
+                for (let d = 0; d < 4; d++) {
+                  map[i + mazeWidth][j + mazeHeight].wall[f][d] = rand() % TEXTURE_COUNT;
+                }
+              }
+              for (let f = 0; f < 4; f++) {
+                map[i + mazeWidth][j + mazeHeight].flat[f] = rand() % TEXTURE_COUNT;
+              }
+            }
+          }
+        }
+
+        regenerateQuads();
+        dirtyMap = true;
+        undoBuffer = [];
+
+      }
+      break;
+
+    case 78: // n
+      if (keyIsDown(ALT)) {
+
+        if (dirtyMap) {
+          let answer = confirm("Discard changes to?");
+          if (!answer) return;
+        }
+
+        selectedMap = -1;
+        removeItem("#mapname");
+        mapName = null;
+        clearMap();
+        regenerateQuads();
+        dirtyMap = false;
+        undoBuffer = [];
+      }
+      break;
+
+    case 77: // m
+      if (keyIsDown(ALT)) {
+
+        if (dirtyMap) {
+          let answer = confirm("Discard changes?");
+          if (!answer) return;
+        }
+
+        selectedMap = -1;
+        removeItem("#mapname");
+        mapName = null;
+        makeMaze();
+        regenerateQuads();
+        dirtyMap = false;
+        undoBuffer = [];
+      }
+      break;
+
+    case 83: // s
+      if (keyIsDown(ALT)) {
+        let candidateMapName;
+        if (selectedMap > -1) {
+          candidateMapName = allMapNames[selectedMap];
+          if (mapName !== null && mapName !== candidateMapName) {
+            let answer = confirm("Overwrite " + candidateMapName + "?");
+            if (!answer) return;
+          }
+        } else if (mapName !== null) {
+          candidateMapName = mapName;
+        } else {
+          candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
+        }
+
+        if (candidateMapName !== null) {
+          mapName = candidateMapName;
+          selectedMap = -1;
+          localStorage.setItem("#mapname", mapName);
+          let data = LZString.compress(JSON.stringify(map));
+          localStorage.setItem(mapName, data);
+          allMapNames = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            if (localStorage.key(i).startsWith("#")) continue;
+            allMapNames.push(localStorage.key(i));
+          }
+          dirtyMap = false;
+        }
+
+      }
+      break;
+
+    case 76: // l
+      if (keyIsDown(ALT)) {
+
+        let candidateMapName;
+        if (selectedMap > -1) {
+          candidateMapName = allMapNames[selectedMap];
+        } else if (mapName !== null) {
+          candidateMapName = mapName;
+        } else {
+          candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
+        }
+
+        if (dirtyMap) {
+          let answer = confirm("Discard changes to " + candidateMapName + "?");
+          if (!answer) return;
+        }
+
+        if (candidateMapName !== null) {
+          let candidateMap = localStorage.getItem(candidateMapName);
+          if (candidateMap !== null) {
+            mapName = candidateMapName;
+            selectedMap = -1;
+            localStorage.setItem("#mapname", mapName);
+            let data = localStorage.getItem(mapName);
+            map = JSON.parse(LZString.decompress(data));
+            regenerateQuads();
+            dirtyMap = false;
+            undoBuffer = [];
+          } else {
+            alert("No map with that name");
+          }
+        }
+
+      }
+      break;
+
+    case 68: // d
+
+      if (keyIsDown(ALT)) {
+
+        let candidateMapName;
+        if (selectedMap > -1) {
+          candidateMapName = allMapNames[selectedMap];
+        } else if (mapName !== null) {
+          candidateMapName = mapName;
+        }
+
+        if (candidateMapName !== null) {
+          let answer = confirm("Are you sure you want to delete " + candidateMapName + "?");
+          if (!answer) return;
+
+          localStorage.removeItem(candidateMapName);
+
+          allMapNames = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            if (localStorage.key(i).startsWith("#")) continue;
+            allMapNames.push(localStorage.key(i));
+          }
+
+          if (mapName == candidateMapName) mapName = null;
+
+          dirtyMap = true;
+          selectedMap = -1;
+
+        }
+
+      }
+
+      break;
+
+  }
+
   if (cursorX !== null && cursorY !== null) {
 
     let changeType = null;
 
     switch (keyCode) {
-
-      case 33: // page up
-
-        if (allMapNames.length > 0) {
-          selectedMap = selectedMap === -1 ? allMapNames.length - 1 : selectedMap - 1;
-        }
-
-        break;
-
-      case 34: // page down
-
-        if (allMapNames.length > 0) {
-          selectedMap = selectedMap === -1 ? 0 : selectedMap + 1;
-          if (selectedMap === allMapNames.length) selectedMap = -1;
-        }
-
-        break;
-
-      case 189: // -
-        drawDistance -= unit;
-        if (drawDistance < unit * 5) drawDistance = unit * 5;
-        break;
-      case 187: // =
-        drawDistance += unit;
-        if (drawDistance > (mazeWidth / 2) * unit) drawDistance = (mazeWidth / 2) * unit;
-        break;
-
-      case 73:
-        if (keyIsDown(ALT)) {
-          illuminate = !illuminate; ``
-        }
-        break;
-
-      case 78: // n
-        if (keyIsDown(ALT)) {
-
-          if (dirtyMap) {
-            let answer = confirm("Discard changes to?");
-            if (!answer) return;
-          }
-
-          selectedMap = -1;
-          removeItem("#mapname");
-          mapName = null;
-          clearMap();
-          regenerateQuads();
-          dirtyMap = false;
-          undoBuffer = [];
-        }
-        break;
-
-      case 77: // m
-        if (keyIsDown(ALT)) {
-
-          if (dirtyMap) {
-            let answer = confirm("Discard changes?");
-            if (!answer) return;
-          }
-
-          selectedMap = -1;
-          removeItem("#mapname");
-          mapName = null;
-          makeMaze();
-          regenerateQuads();
-          dirtyMap = false;
-          undoBuffer = [];
-        }
-        break;
-
-      case 83: // s
-        if (keyIsDown(ALT)) {
-          let candidateMapName;
-          if (selectedMap > -1) {
-            candidateMapName = allMapNames[selectedMap];
-            if (mapName !== null && mapName !== candidateMapName) {
-              let answer = confirm("Overwrite " + candidateMapName + "?");
-              if (!answer) return;
-            }
-          } else if (mapName !== null) {
-            candidateMapName = mapName;
-          } else {
-            candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
-          }
-
-          if (candidateMapName !== null) {
-            mapName = candidateMapName;
-            selectedMap = -1;
-            localStorage.setItem("#mapname", mapName);
-            let data = LZString.compress(JSON.stringify(map));
-            localStorage.setItem(mapName, data);
-            allMapNames = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              if (localStorage.key(i).startsWith("#")) continue;
-              allMapNames.push(localStorage.key(i));
-            }
-            dirtyMap = false;
-          }
-
-        }
-        break;
-
-      case 76: // l
-        if (keyIsDown(ALT)) {
-
-          let candidateMapName;
-          if (selectedMap > -1) {
-            candidateMapName = allMapNames[selectedMap];
-          } else if (mapName !== null) {
-            candidateMapName = mapName;
-          } else {
-            candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
-          }
-
-          if (dirtyMap) {
-            let answer = confirm("Discard changes to " + candidateMapName + "?");
-            if (!answer) return;
-          }
-
-          if (candidateMapName !== null) {
-            let candidateMap = localStorage.getItem(candidateMapName);
-            if (candidateMap !== null) {
-              mapName = candidateMapName;
-              selectedMap = -1;
-              localStorage.setItem("#mapname", mapName);
-              let data = localStorage.getItem(mapName);
-              map = JSON.parse(LZString.decompress(data));
-              regenerateQuads();
-              dirtyMap = false;
-              undoBuffer = [];
-            } else {
-              alert("No map with that name");
-            }
-          }
-
-        }
-        break;
-
-      case 68: // d
-
-        if (keyIsDown(ALT)) {
-
-          let candidateMapName;
-          if (selectedMap > -1) {
-            candidateMapName = allMapNames[selectedMap];
-          } else if (mapName !== null) {
-            candidateMapName = mapName;
-          }
-
-          if (candidateMapName !== null) {
-            let answer = confirm("Are you sure you want to delete " + candidateMapName + "?");
-            if (!answer) return;
-
-            localStorage.removeItem(candidateMapName);
-
-            allMapNames = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              if (localStorage.key(i).startsWith("#")) continue;
-              allMapNames.push(localStorage.key(i));
-            }
-
-            if (mapName == candidateMapName) mapName = null;
-
-            dirtyMap = true;
-            selectedMap = -1;
-
-          }
-
-        }
-
-        break;
 
       case SHIFT:
         if (markerY !== null || markerY !== null) {
