@@ -35,12 +35,13 @@ const mazeWidth = 40;
 const mazeHeight = 40;
 let drawDistance = 1000;
 
-let mapName = null, allMapNames = [];
+let mapName = null, allMapNames = [], selectedMap = -1;
 
 let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAngle = 0, playerPitch = 0;
 let lastPlayerX, lastPlayerY;
 
 let cursorX = null, cursorY = null, cursorLevel, cursorLock = 0;
+let lastCursorX = null, lastCursorY = null, lastCursorLevel = null;
 let cursorTexture, cursorFloor, cursorWall, cursorType, selectedTexture = 0;
 let markerX = null, markerY = null, stepStack = [];
 
@@ -61,6 +62,8 @@ p5.disableFriendlyErrors = true;
 
 let inconsolata;
 let framerateStack = [];
+
+let undoBuffer = [];
 
 let toggles = {
 
@@ -157,41 +160,95 @@ function mouseDragged() {
   mouseMoved();
 }
 
+function undo() {
+
+  if (undoBuffer.length === 0) return;
+
+  let f = undoBuffer[undoBuffer.length - 1].frame;
+
+  while (undoBuffer.length > 0 && undoBuffer[undoBuffer.length - 1].frame === f) {
+    let q = undoBuffer.pop();
+    console.log("BEFORE: " + JSON.stringify(map[q.x][q.y]));
+    map[q.x][q.y].type = q.type;
+    map[q.x][q.y].flat = [...q.flat];
+    map[q.x][q.y].wall = [[...q.wall[0]], [...q.wall[1]], [...q.wall[2]]];
+    console.log("AFTER: " + JSON.stringify(map[q.x][q.y]));
+  }
+
+  regenerateQuads();
+
+}
+
+function setQuadType(x, y, type) {
+
+  if (map[x][y].type !== type) {    
+
+    undoBuffer.push({
+      frame: frameCount,
+      x: x,
+      y: y,
+      type: map[x][y].type,
+      flat: [...map[x][y].flat],
+      wall: [[...map[x][y].wall[0]], [...map[x][y].wall[1]], [...map[x][y].wall[2]]]
+    });
+
+    map[x][y].type = type;
+
+  }
+
+
+}
+
 function setQuadTexture(x, y, level, id, wall) {
 
-  console.log(x, y, level, id, wall);
+  let change = false;
 
-  if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeHeight) return 0;
-  let setCount = 0;
-  for (let i = 0; i < quads.length; i++) {
-    if (quads[i].mapX == x && quads[i].mapY == y) {
-      if (wall !== null) {
-        if (quads[i].wall && quads[i].level === level && quads[i].direction === wall) {
-          quads[i].texture = id;
-          setCount++;
-        }
-      } else {
-        if (!quads[i].wall && quads[i].level === level) {
-          quads[i].texture = id;
-          setCount++;
+  if (x < 0 || y < 0 || x > 2 * mazeWidth || y > 2 * mazeHeight) return;
+
+  let before = {
+    frame: frameCount,
+    x: x,
+    y: y,
+    type: map[x][y].type,
+    flat: [...map[x][y].flat],
+    wall: [[...map[x][y].wall[0]], [...map[x][y].wall[1]], [...map[x][y].wall[2]]]
+  };
+
+  if (wall === null) {
+    if (level >= 0 && level <= 3) {
+      if (map[x][y].flat[level] !== id) {
+        map[x][y].flat[level] = id;
+        change = true;
+      }
+    }
+  } else {
+    if (level >= 0 && level <= 2) {
+      if (map[x][y].wall[level][wall] !== id) {
+        map[x][y].wall[level][wall] = id;
+        change = true;
+      }
+    }
+  }
+
+  if (change) {
+
+    undoBuffer.push(before);
+
+    for (let i = 0; i < quads.length; i++) {
+      if (quads[i].mapX == x && quads[i].mapY == y) {
+        if (wall !== null) {
+          if (quads[i].wall && quads[i].level === level && quads[i].direction === wall) {
+            quads[i].texture = id;
+          }
+        } else {
+          if (!quads[i].wall && quads[i].level === level) {
+            quads[i].texture = id;
+          }
         }
       }
     }
 
   }
-
-
-  if (wall === null) {
-    if (level >= 0 && level <= 3) {
-      map[x][y].flat[level] = id;
-    }
-  } else {
-    if (level >= 0 && level <= 2) {
-      map[x][y].wall[level][wall] = id;
-    }
-  }
-
-  return setCount;
 }
 
 function quadStruct(p1, p2, p3, p4,
@@ -597,10 +654,15 @@ function handlePlayInputs(frameLength) {
     let dy = (playerY - lastPlayerY) / distanceTravelled;
     playerX = lastPlayerX + dx * unit / 2;
     playerY = lastPlayerY + dy * unit / 2;
-    console.log("Stead on, son.");
   }
 
   if (keyIsDown(32)) { // space
+
+    if (cursorX === lastCursorX && cursorY === lastCursorY && cursorLevel === lastCursorLevel) return;
+
+    lastCursorX = cursorX;
+    lastCursorY = cursorY;
+    lastCursorLevel = cursorLevel;
 
     if (markerY !== null && markerY !== null) {
       let x0 = min(cursorX, markerX);
@@ -652,7 +714,7 @@ function handlePlayInputs(frameLength) {
       if (selectedTexture > 175) selectedTexture = 175;
 
     }
-    
+
   }
 
 }
@@ -673,8 +735,8 @@ function mouseWheel(event) {
 
     x0 = cursorX;
     y0 = cursorY;
-    x1 = cursorX;
-    y1 = cursorY;
+    x1 = cursorX + 1;
+    y1 = cursorY + 1;
 
   }
 
@@ -687,16 +749,16 @@ function mouseWheel(event) {
           case WALL:
             break;
           case HIGH_ROOM:
-            map[x][y].type = LOW_ROOM;
+            setQuadType(x, y, LOW_ROOM);
             break;
           case CORRIDOR:
-            map[x][y].type = WALL;
+            setQuadType(x, y, WALL);
             break;
           case LOW_ROOM:
-            map[x][y].type = CORRIDOR;
+            setQuadType(x, y, CORRIDOR);
             break;
           default:
-            map[x][y].type = HIGH_ROOM;
+            setQuadType(x, y, HIGH_ROOM);
         }
 
       }
@@ -711,16 +773,16 @@ function mouseWheel(event) {
           case HIGH_ROOM:
             break;
           case WALL:
-            map[x][y].type = CORRIDOR;
+            setQuadType(x, y, CORRIDOR);
             break;
           case CORRIDOR:
-            map[x][y].type = LOW_ROOM;
+            setQuadType(x, y, LOW_ROOM);
             break;
           case LOW_ROOM:
-            map[x][y].type = HIGH_ROOM;
+            setQuadType(x, y, HIGH_ROOM);
             break;
           default:
-            map[x][y].type = SKY;
+            setQuadType(x, y, SKY);
         }
 
       }
@@ -923,34 +985,45 @@ function renderOverlay() {
   textSize(18);
   fill(255, 255, 255);
   text(floor(averageFPS) + " FPS", w / 2 - 5, -h / 4 + 5);
-  let ty = 1;
-  for (let t of Object.keys(toggles)) {
-    if (toggles[t]) {
-      fill(0, 128, 0);
-      text("[" + ty + "] " + t + " on", w / 2 - 5, -h / 4 + ty * 15 + 10);
-    } else {
-      fill(255, 0, 0);
-      text("[" + ty + "] " + t + " off", w / 2 - 5, -h / 4 + ty * 15 + 10);
+  if (keyIsDown(84)) {
+    let ty = 1;
+    for (let t of Object.keys(toggles)) {
+      if (toggles[t]) {
+        fill(0, 128, 0);
+        text("[" + ty + "] " + t + " on", w / 2 - 5, -h / 4 + ty * 15 + 10);
+      } else {
+        fill(255, 0, 0);
+        text("[" + ty + "] " + t + " off", w / 2 - 5, -h / 4 + ty * 15 + 10);
+      }
+      ty++;
     }
-    ty++;
+  } else {
+    fill(0, 0, 255);
+    text("Undo buffer: " + undoBuffer.length, w / 2 - 5, -h / 4 + 25);
   }
 
-  fill(255, 255, 255);
   textAlign(LEFT, TOP);
   textSize(18);
+
   if (mapName !== null) {
+    fill(255, 255, 255);
     text(mapName, -w / 2, -h / 4 + 5);
   } else {
+    fill(128, 128, 128);
     text("{untitled}", -w / 2, -h / 4 + 5);
   }
 
-  fill(128, 128, 128);
-  let m = 25;
+
+  let m = -1;
   textSize(14);
   for (let n of allMapNames) {
-    if (n === mapName) continue;
-    text(n, -w / 2, -h / 4 + m);
-    m += 15;
+    m++;
+    if (selectedMap === m) {
+      fill(255, 255, 0);
+    } else {
+      fill(128, 128, 128);
+    }
+    text(n, -w / 2, -h / 4 + m * 15 + 25);
   }
 
   stroke(255, 255, 255);
@@ -1310,18 +1383,47 @@ function evaluateCursor() {
 }
 
 function keyReleased() {
-  if (keyCode === 69) requestPointerLock();
+  if (keyCode === 69) { // e
+    requestPointerLock();
+    return
+  }
 }
 
 function keyPressed() {
 
-  if (keyCode === 69) exitPointerLock(); // e
+  if (keyCode === 69) { // e
+    exitPointerLock();
+    return
+  }
+
+  if (keyCode === 90 && keyIsDown(CONTROL)) { // z    
+    undo();
+    return;
+  }
 
   if (cursorX !== null && cursorY !== null) {
 
     let changeType = null;
 
     switch (keyCode) {
+
+      case 33:
+
+        if (allMapNames.length > 0) {
+          selectedMap = selectedMap === -1 ? allMapNames.length - 1
+            : (selectedMap + allMapNames.length - 1) % allMapNames.length;
+        }
+
+        break;
+
+      case 34:
+
+        if (allMapNames.length > 0) {
+          selectedMap = selectedMap === -1 ? 0
+            : (selectedMap + 1) % allMapNames.length;
+        }
+
+        break;
 
       case 189: // -
         drawDistance -= unit;
@@ -1340,6 +1442,7 @@ function keyPressed() {
 
       case 78: // n
         if (keyIsDown(ALT)) {
+          selectedMap = -1;
           removeItem("#mapname");
           mapName = null;
           clearMap();
@@ -1349,6 +1452,7 @@ function keyPressed() {
 
       case 77: // m
         if (keyIsDown(ALT)) {
+          selectedMap = -1;
           removeItem("#mapname");
           mapName = null;
           makeMaze();
@@ -1358,7 +1462,12 @@ function keyPressed() {
 
       case 83: // s
         if (keyIsDown(ALT)) {
-          let candidateMapName = prompt("Enter map name", mapName);
+          let candidateMapName;
+          if (selectedMap > -1) {
+            candidateMapName = allMapNames[selectedMap];
+          } else {
+            candidateMapName = prompt("Enter map name", mapName | "");
+          }
           if (candidateMapName !== null) {
             mapName = candidateMapName;
             localStorage.setItem("#mapname", mapName);
@@ -1375,7 +1484,12 @@ function keyPressed() {
 
       case 76: // l
         if (keyIsDown(ALT)) {
-          let candidateMapName = prompt("Enter map name", mapName);
+          let candidateMapName;
+          if (selectedMap > -1) {
+            candidateMapName = allMapNames[selectedMap];
+          } else {
+            candidateMapName = prompt("Enter map name", mapName);
+          }
           if (candidateMapName !== null) {
             let candidateMap = localStorage.getItem(candidateMapName);
             if (candidateMap !== null) {
@@ -1475,11 +1589,11 @@ function keyPressed() {
         let y1 = max(cursorY, markerY) + 1;
         for (let x = x0; x < x1; x++) {
           for (let y = y0; y < y1; y++) {
-            map[x][y].type = changeType;
+            setQuadType(x, y, changeType);
           }
         }
       } else {
-        map[cursorX][cursorY].type = changeType;
+        setQuadType(cursorX, cursorY, changeType);
       }
       regenerateQuads();
     }
