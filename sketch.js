@@ -63,7 +63,9 @@ p5.disableFriendlyErrors = true;
 let inconsolata;
 let framerateStack = [];
 
-let undoBuffer = [];
+let undoBuffer = [], dirtyMap = false;
+
+const MAX_UNDOS = 10000;
 
 let toggles = {
 
@@ -181,7 +183,7 @@ function undo() {
 
 function setQuadType(x, y, type) {
 
-  if (map[x][y].type !== type) {    
+  if (map[x][y].type !== type) {
 
     undoBuffer.push({
       frame: frameCount,
@@ -192,7 +194,13 @@ function setQuadType(x, y, type) {
       wall: [[...map[x][y].wall[0]], [...map[x][y].wall[1]], [...map[x][y].wall[2]]]
     });
 
+    while (undoBuffer.length > MAX_UNDOS) {
+      undoBuffer.shift();
+    }
+
     map[x][y].type = type;
+
+    dirtyMap = true;
 
   }
 
@@ -247,6 +255,12 @@ function setQuadTexture(x, y, level, id, wall) {
         }
       }
     }
+
+    while (undoBuffer.length > MAX_UNDOS) {
+      undoBuffer.shift();
+    }
+
+    dirtyMap = true;
 
   }
 }
@@ -997,19 +1011,24 @@ function renderOverlay() {
       }
       ty++;
     }
-  } else {
+  } else if (undoBuffer.length > 0) {
     fill(0, 0, 255);
-    text("Undo buffer: " + undoBuffer.length, w / 2 - 5, -h / 4 + 25);
+    text("Undo buffer: " + undoBuffer.length + " / " + MAX_UNDOS, w / 2 - 5, -h / 4 + 25);
   }
 
   textAlign(LEFT, TOP);
   textSize(18);
 
+  if (dirtyMap) {
+    fill(255, 0, 0);
+  } else {
+    fill(0, 255, 0);
+  }
+
   if (mapName !== null) {
-    fill(255, 255, 255);
     text(mapName, -w / 2, -h / 4 + 5);
   } else {
-    fill(128, 128, 128);
+
     text("{untitled}", -w / 2, -h / 4 + 5);
   }
 
@@ -1034,20 +1053,20 @@ function renderOverlay() {
 
   textureMode(NORMAL);
 
-  if (keyIsDown(69)) {
+  if (keyIsDown(69)) { // e
 
     let size = floor(h / 16);
 
-    for (let i = 0; i < 14; i++) {
-      for (let j = 0; j < 14; j++) {
-        if (i + j * 14 > 175) continue;
-        texture(textures[i + j * 14]);
+    for (let i = 0; i < 16; i++) {
+      for (let j = 0; j < 16; j++) {
+        if (i + j * 16 > 175) continue;
+        texture(textures[i + j * 16]);
         rect((i - 7) * size + 5, (j - 7) * size + 5, size - 10, size - 10);
         if (mouseX > w / 2 + (i - 7) * size + 5 &&
           mouseY > h / 2 + (j - 7) * size + 5 &&
           mouseX < w / 2 + (i - 7) * size + (size - 5) &&
           mouseY < h / 2 + (j - 7) * size + (size - 5)) {
-          selectedTexture = i + j * 14;
+          selectedTexture = i + j * 16;
         }
       }
     }
@@ -1158,10 +1177,10 @@ function renderQuads() {
 
     beginShape();
 
-    vertex(q.vertices[0].x, q.vertices[0].z, q.vertices[0].y, 0, 0);
-    vertex(q.vertices[1].x, q.vertices[1].z, q.vertices[1].y, 0, 1);
-    vertex(q.vertices[2].x, q.vertices[2].z, q.vertices[2].y, 1, 1);
-    vertex(q.vertices[3].x, q.vertices[3].z, q.vertices[3].y, 1, 0);
+    vertex(q.vertices[0].x, q.vertices[0].z, q.vertices[0].y, 0, 1);
+    vertex(q.vertices[1].x, q.vertices[1].z, q.vertices[1].y, 0, 0);
+    vertex(q.vertices[2].x, q.vertices[2].z, q.vertices[2].y, 1, 0);
+    vertex(q.vertices[3].x, q.vertices[3].z, q.vertices[3].y, 1, 1);
 
     endShape();
 
@@ -1407,20 +1426,19 @@ function keyPressed() {
 
     switch (keyCode) {
 
-      case 33:
+      case 33: // page up
 
         if (allMapNames.length > 0) {
-          selectedMap = selectedMap === -1 ? allMapNames.length - 1
-            : (selectedMap + allMapNames.length - 1) % allMapNames.length;
+          selectedMap = selectedMap === -1 ? allMapNames.length - 1 : selectedMap - 1;
         }
 
         break;
 
-      case 34:
+      case 34: // page down
 
         if (allMapNames.length > 0) {
-          selectedMap = selectedMap === -1 ? 0
-            : (selectedMap + 1) % allMapNames.length;
+          selectedMap = selectedMap === -1 ? 0 : selectedMap + 1;
+          if (selectedMap === allMapNames.length) selectedMap = -1;
         }
 
         break;
@@ -1442,21 +1460,37 @@ function keyPressed() {
 
       case 78: // n
         if (keyIsDown(ALT)) {
+
+          if (dirtyMap) {
+            let answer = confirm("Discard changes to?");
+            if (!answer) return;
+          }
+
           selectedMap = -1;
           removeItem("#mapname");
           mapName = null;
           clearMap();
           regenerateQuads();
+          dirtyMap = false;
+          undoBuffer = [];
         }
         break;
 
       case 77: // m
         if (keyIsDown(ALT)) {
+
+          if (dirtyMap) {
+            let answer = confirm("Discard changes?");
+            if (!answer) return;
+          }
+
           selectedMap = -1;
           removeItem("#mapname");
           mapName = null;
           makeMaze();
           regenerateQuads();
+          dirtyMap = false;
+          undoBuffer = [];
         }
         break;
 
@@ -1465,11 +1499,19 @@ function keyPressed() {
           let candidateMapName;
           if (selectedMap > -1) {
             candidateMapName = allMapNames[selectedMap];
+            if (mapName !== null && mapName !== candidateMapName) {
+              let answer = confirm("Overwrite " + candidateMapName + "?");
+              if (!answer) return;
+            }
+          } else if (mapName !== null) {
+            candidateMapName = mapName;
           } else {
-            candidateMapName = prompt("Enter map name", mapName | "");
+            candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
           }
+
           if (candidateMapName !== null) {
             mapName = candidateMapName;
+            selectedMap = -1;
             localStorage.setItem("#mapname", mapName);
             let data = LZString.compress(JSON.stringify(map));
             localStorage.setItem(mapName, data);
@@ -1478,31 +1520,80 @@ function keyPressed() {
               if (localStorage.key(i).startsWith("#")) continue;
               allMapNames.push(localStorage.key(i));
             }
+            dirtyMap = false;
           }
+
         }
         break;
 
       case 76: // l
         if (keyIsDown(ALT)) {
+
           let candidateMapName;
           if (selectedMap > -1) {
             candidateMapName = allMapNames[selectedMap];
+          } else if (mapName !== null) {
+            candidateMapName = mapName;
           } else {
-            candidateMapName = prompt("Enter map name", mapName);
+            candidateMapName = prompt("Enter map name", mapName === null ? "" : mapName);
           }
+
+          if (dirtyMap) {
+            let answer = confirm("Discard changes to " + candidateMapName + "?");
+            if (!answer) return;
+          }
+
           if (candidateMapName !== null) {
             let candidateMap = localStorage.getItem(candidateMapName);
             if (candidateMap !== null) {
               mapName = candidateMapName;
+              selectedMap = -1;
               localStorage.setItem("#mapname", mapName);
               let data = localStorage.getItem(mapName);
               map = JSON.parse(LZString.decompress(data));
               regenerateQuads();
+              dirtyMap = false;
+              undoBuffer = [];
             } else {
               alert("No map with that name");
             }
           }
+
         }
+        break;
+
+      case 68: // d
+
+        if (keyIsDown(ALT)) {
+
+          let candidateMapName;
+          if (selectedMap > -1) {
+            candidateMapName = allMapNames[selectedMap];
+          } else if (mapName !== null) {
+            candidateMapName = mapName;
+          }
+
+          if (candidateMapName !== null) {
+            let answer = confirm("Are you sure you want to delete " + candidateMapName + "?");
+            if (!answer) return;
+
+            localStorage.removeItem(candidateMapName);
+
+            allMapNames = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              if (localStorage.key(i).startsWith("#")) continue;
+              allMapNames.push(localStorage.key(i));
+            }
+
+            if (mapName == candidateMapName) mapName = null;
+
+            dirtyMap = true;
+            selectedMap = -1;
+
+          }
+
+        }
+
         break;
 
       case SHIFT:
