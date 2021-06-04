@@ -41,15 +41,12 @@ let mapName = null, allMapNames = [], selectedMap = -1;
 let playerX = 3 * unit / 2, playerY = 3 * unit / 2, playerZ = unit / 2, playerAngle = 0, playerPitch = 0;
 let lastPlayerX, lastPlayerY;
 
-let cursorX = null, cursorY = null, cursorLevel, cursorLock = 0;
+let cursorX = null, cursorY = null, cursorLevel, cursorType, cursorLock = 0;
 let lastCursorX = null, lastCursorY = null, lastCursorLevel = null;
-let cursorTexture, cursorFloor, cursorWall, cursorType, selectedTexture = 0;
+let cursorTexture, cursorWall, selectedTexture = 0;
 let markerX = null, markerY = null, stepStack = [];
 
-let levelNo = 1;
-
 let quads = [];
-let sortedQuads = [];
 let map = [];
 let kruskalMaze = [];
 let rays;
@@ -82,7 +79,6 @@ let toggles = {
   dotProductTest: true
 
 }
-
 
 function preload() {
 
