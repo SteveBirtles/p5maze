@@ -1,2 +1,3 @@
+- add touch controls
 - download and upload map facility
 - display controls on overlay
